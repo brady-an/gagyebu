@@ -340,6 +340,7 @@ const acc = id => S.accounts.find(a=>a.id===id);
 const accName = id => acc(id)?.name || '(삭제된 계좌)';
 function catIcon(type, name){
   const list = S.cats[type==='in'?'in':'out'] || [];
+  if (name==='미분류') return '❔';
   const f = list.find(c=>c[0]===name); return f ? f[1] : (type==='tr' ? '🔁' : '•');
 }
 // 체크카드는 연결 계좌로 돈이 빠짐
@@ -520,7 +521,7 @@ function txRow(t){
     icon='🔁'; title = memo || '이체'; sub = `${esc(accName(t.from))} → ${esc(accName(t.to))}`; cls='tr'; sign='';
   } else {
     icon = catIcon(t.type, t.cat); title = memo || esc(t.cat||'');
-    sub = (memo ? esc(t.cat)+' · ' : '') + esc(accName(t.type==='out'?t.from:t.to));
+    sub = (memo ? esc(t.cat)+' · ' : '') + esc(accName(t.type==='out'?t.from:t.to)) + (t.discount ? ` · <span class="down">할인 ${won(t.discount)}</span>` : '');
     cls = t.type==='out'?'out':'in'; sign = t.type==='out'?'−':'+';
   }
   return `<button class="tx" data-act="editTx" data-id="${t.id}"><span class="ico">${icon}</span>
@@ -665,6 +666,15 @@ function viewStats(){
       <div class="r"><b class="num">${won(v)}</b><small class="faint">${Math.round(v/total*100)}%</small></div></div>`}).join('')}</div>`;
   }
 
+  // 카드 할인 혜택
+  const discs = monthTx(ym).filter(t=>t.discount>0);
+  if (discs.length){
+    const dsum = discs.reduce((x,t)=>x+Number(t.discount),0), byC = {};
+    discs.forEach(t=>byC[t.from]=(byC[t.from]||0)+Number(t.discount));
+    h += `<div class="card"><div class="grouphead"><h3>🎁 카드 할인 혜택</h3><b class="num down">${won(dsum)}원</b></div>${Object.entries(byC).sort((a,b)=>b[1]-a[1]).map(([id,v])=>
+      `<div class="row" style="padding:5px 0;font-size:14px"><span>${esc(accName(id))}</span><span class="num">${won(v)}원 · ${discs.filter(t=>t.from===id).length}건</span></div>`).join('')}</div>`;
+  }
+
   // 6개월 추이
   const months = Array.from({length:6},(_,i)=>addMonth(ym,i-5));
   const data = months.map(m=>{const l=monthTx(m);return {m,o:sumBy(l,'out'),i:sumBy(l,'in')}});
@@ -774,7 +784,8 @@ const parseAmt = v => Number(String(v).replace(/[^0-9]/g,''))||0;
 let F = null; // 편집 중 폼 상태
 function txForm(t, preset){
   const last = S.settings.last || {};
-  F = t ? JSON.parse(JSON.stringify(t)) : Object.assign({id:null, type:'out', amount:0, date: (UI.ym===curYM()?today():UI.ym+'-01'), cat:'', from:last.out||'', to:last.in||'', memo:''}, preset||{});
+  F = t ? JSON.parse(JSON.stringify(t)) : Object.assign({id:null, type:'out', amount:0, discount:0, date: (UI.ym===curYM()?today():UI.ym+'-01'), cat:'', from:last.out||'', to:last.in||'', memo:''}, preset||{});
+  if (t && t.discount) F.amount = Number(t.amount) + Number(t.discount); // 폼에서는 할인 전 결제 금액으로 보여줌
   if (!t && F.type==='tr'){ F.from = F.from||last.trFrom||''; F.to = F.to||last.trTo||''; }
   drawTxForm();
 }
@@ -790,7 +801,13 @@ function drawTxForm(){
   if (!F.id && S.favs.length) h += `<div class="favs">${S.favs.map((f,k)=>`<button class="fav" data-act="useFav" data-v="${k}"><span>${catIcon(f.type,f.cat)} ${esc(favTitle(f))}</span><small class="num">${f.amount?won(f.amount)+'원':'금액 입력'}</small></button>`).join('')}</div>`;
   h += `<div class="seg">${[['out','지출'],['in','수입'],['tr','이체']].map(([k,l])=>`<button data-act="ftype" data-v="${k}" class="${T===k?'on':''}">${l}</button>`).join('')}</div>`;
   h += `<div class="amountbox"><input id="amt" inputmode="numeric" autocomplete="off" placeholder="0" value="${F.amount?won(F.amount):''}"><span>원</span></div>`;
-  h += `<div class="quick">${[1000,5000,10000,50000].map(n=>`<button data-act="addAmt" data-v="${n}">+${n>=10000?n/10000+'만':won(n)}</button>`).join('')}<button data-act="addAmt" data-v="0">지우기</button></div>`;
+  const quickRow = `<div class="quick">${[1000,5000,10000,50000].map(n=>`<button data-act="addAmt" data-v="${n}">+${n>=10000?n/10000+'만':won(n)}</button>`).join('')}<button data-act="addAmt" data-v="0">지우기</button></div>`;
+  h += quickRow;
+  if (T==='out'){
+    h += `<div class="fieldrow" style="align-items:center;margin:-4px 0 6px"><span style="flex:0 0 auto;font-size:14px;color:var(--sub);font-weight:600">할인</span>
+      <input class="field" id="fdisc" inputmode="numeric" placeholder="청구할인 등 (선택)" value="${F.discount?won(F.discount):''}" style="padding:9px 12px;font-size:15px">
+      <span id="fnet" class="num" style="flex:0 0 auto;font-size:13px;color:var(--sub);min-width:96px;text-align:right"></span></div>`;
+  }
   if (T!=='tr'){
     h += `<div class="label">카테고리</div><div class="catgrid">${S.cats[T].map(([n,i])=>`<button class="chip ${F.cat===n?'on':''}" data-act="fset" data-f="cat" data-v="${esc(n)}"><em>${i}</em>${esc(n)}</button>`).join('')}</div>`;
   }
@@ -805,7 +822,9 @@ function drawTxForm(){
   h += `<div class="label">내용 (선택)</div><input class="field" id="fmemo" placeholder="${T==='tr'?'예: 카드값 납부':'예: 학식, 편의점'}" value="${esc(F.memo)}">`;
   h += `<div class="btns"><button class="btn" data-act="saveTx">저장</button>${F.id?`<button class="btn danger" data-act="delTx">삭제</button>`:''}</div>`;
   openSheet(h);
-  const amt = $('#amt');
+  const amt = $('#amt'), disc = $('#fdisc');
+  const showNet = ()=>{ const n=$('#fnet'); if (!n) return; const d=parseAmt(disc.value); n.innerHTML = d ? `실제 <b style="color:var(--text)">${won(Math.max(0,parseAmt(amt.value)-d))}</b>원` : ''; };
+  if (disc){ disc.addEventListener('input', ()=>{ const d=parseAmt(disc.value); disc.value = d?won(d):''; F.discount=d; showNet(); }); amt.addEventListener('input', showNet); showNet(); }
   amt.addEventListener('input', ()=>{ F.amount = parseAmt(amt.value); amt.value = F.amount? won(F.amount):''; });
   if (!F.id) setTimeout(()=>amt.focus(), 280);
 }
@@ -815,15 +834,17 @@ function favSub(f){
   return `${f.amount?won(f.amount)+'원':'금액 직접 입력'} · ${esc(where)}`;
 }
 function sameFav(a,b){ return a.type===b.type && a.cat===b.cat && a.from===b.from && a.to===b.to && a.memo===b.memo && Number(a.amount)===Number(b.amount); }
-function readTxInputs(){ F.amount = parseAmt($('#amt').value); F.date = $('#fdate').value || today(); F.memo = $('#fmemo').value.trim(); }
+function readTxInputs(){ F.amount = parseAmt($('#amt').value); F.date = $('#fdate').value || today(); F.memo = $('#fmemo').value.trim(); const d=$('#fdisc'); F.discount = d ? parseAmt(d.value) : 0; }
 function saveTx(){
   readTxInputs();
   if (!F.amount) return toast('금액을 입력해 주세요');
+  if (F.type!=='out') F.discount = 0;
+  if (F.discount >= F.amount) return toast('할인이 결제 금액보다 커요');
   if (F.type==='out'){ if(!F.cat) return toast('카테고리를 골라 주세요'); if(!F.from) return toast('결제수단을 골라 주세요'); F.to=''; }
   if (F.type==='in'){ if(!F.cat) return toast('카테고리를 골라 주세요'); if(!F.to) return toast('받은 계좌를 골라 주세요'); F.from=''; }
   if (F.type==='tr'){ if(!F.from||!F.to) return toast('보내는 곳과 받는 곳을 골라 주세요'); if(F.from===F.to) return toast('같은 계좌끼리는 이체할 수 없어요'); F.cat=''; }
   const now = new Date().toISOString();
-  const rec = {id:F.id||uid(), type:F.type, amount:F.amount, date:F.date, cat:F.cat, from:F.from, to:F.to, memo:F.memo, fixedId:F.fixedId||'', created:F.created||now, updated:now};
+  const rec = {id:F.id||uid(), type:F.type, amount:F.amount-(F.discount||0), discount:F.discount||0, date:F.date, cat:F.cat, from:F.from, to:F.to, memo:F.memo, fixedId:F.fixedId||'', created:F.created||now, updated:now};
   const i = S.txs.findIndex(t=>t.id===rec.id);
   if (i>=0) S.txs[i]=rec; else S.txs.push(rec);
   S.settings.last = S.settings.last||{};
@@ -868,6 +889,9 @@ function adjustForm(){
     }
     h += `</div>`;
   }
+  const firstTime = !S.accounts.some(a=>a.startDate);
+  h += `<div class="cell" style="margin-top:4px"><span>차이를 '잔액 조정' 내역으로 기록<br><small>켜면 모자라거나 남는 금액이 미분류 지출·수입으로 남아 통계에 반영돼요. 처음 세팅할 때는 꺼두세요.</small></span>
+    <label class="toggle"><input type="checkbox" id="adjrec" ${firstTime?'':'checked'}><span></span></label></div>`;
   h += `<div class="btns"><button class="btn" data-act="saveAdjust">이 금액으로 맞추기</button></div>`;
   openSheet(h);
   document.querySelectorAll('.adj').forEach(el=>el.addEventListener('input',()=>{ const n=parseAmt(el.value); el.value = el.value.trim()===''?'':won(n); }));
@@ -875,25 +899,36 @@ function adjustForm(){
 function saveAdjust(){
   const bal = balances(), td = today(), vals = {};
   document.querySelectorAll('.adj').forEach(el=>{ (vals[el.dataset.id] ||= {})[el.dataset.k] = el.value.trim()===''? null : parseAmt(el.value); });
-  let changed = 0;
+  let changed = 0; const asTx = $('#adjrec')?.checked, now = new Date().toISOString(), newTx = [];
+  const addAdj = (type, accId, amount) => newTx.push({id:uid(), type, amount, discount:0, date:td, cat:'미분류', from:type==='out'?accId:'', to:type==='in'?accId:'', memo:'잔액 조정', fixedId:'', created:now, updated:now});
   for (const [id, v] of Object.entries(vals)){
     const a = acc(id); if (!a) continue;
     if (a.type==='credit'){
       const nd = nextDue(a), curPer = cyclePeriod(a, addMonth(ymOf((nd||{base:td}).base), 1));
       const billed = v.billed||0, cycleTotal = v.cycle||0;
       const recorded = curPer ? S.txs.filter(t=>t.from===a.id&&t.type==='out'&&t.date>=curPer.start&&t.date<=td).reduce((x,t)=>x+Number(t.amount),0) : 0;
-      const extraCycle = Math.max(0, cycleTotal - recorded);
+      let extraCycle = Math.max(0, cycleTotal - recorded);
+      if (asTx){ // 기록 안 한 이번 기간 사용분은 미분류 지출로 남김
+        const missing = extraCycle - Number(a.startCycle||0);
+        if (missing>0){ addAdj('out', a.id, missing); extraCycle = Number(a.startCycle||0); }
+      }
       let net = 0; for (const t of S.txs){ const m=Number(t.amount)||0; if ((t.type==='out'||t.type==='tr')&&t.from===a.id) net-=m; if ((t.type==='in'||t.type==='tr')&&t.to===a.id) net+=m; }
       const target = -(billed + Math.max(cycleTotal, recorded));
-      const newStart = target - net;
+      const newStart = target - net + newTx.filter(t=>t.from===a.id).reduce((x,t)=>x+t.amount,0);
       if (newStart!==Number(a.start) || extraCycle!==Number(a.startCycle||0)){ a.start = newStart; a.startCycle = extraCycle; a.startDate = td; changed++; }
     } else {
-      if (v.bal!=null && v.bal!==(bal[id]||0)){ a.start = (Number(a.start)||0) + (v.bal - (bal[id]||0)); a.startDate = td; changed++; }
+      if (v.bal!=null && v.bal!==(bal[id]||0)){
+        const diff = v.bal - (bal[id]||0);
+        if (asTx && a.type!=='invest'){ addAdj(diff<0?'out':'in', a.id, Math.abs(diff)); }
+        else { a.start = (Number(a.start)||0) + diff; a.startDate = td; }
+        changed++; }
       if (a.type==='invest' && v.value!==undefined){ const nv = v.value==null?'':v.value; if (nv!==a.value){ a.value = nv; changed++; } }
     }
   }
+  S.txs.push(...newTx);
+  if (asTx) S.accounts.forEach(a=>{ if (!a.startDate) a.startDate = td; });
   closeSheet();
-  if (changed){ persist(); render(); toast('오늘 기준으로 맞췄어요'); } else toast('바뀐 금액이 없어요');
+  if (changed){ persist(); render(); toast(newTx.length ? `조정 내역 ${newTx.length}건을 기록했어요` : '오늘 기준으로 맞췄어요'); } else toast('바뀐 금액이 없어요');
 }
 
 /* ---- 검색 ---- */
