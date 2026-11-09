@@ -230,6 +230,27 @@ select.field{appearance:none;-webkit-appearance:none}
 .toggle input:checked+span{background:var(--accent)}
 .toggle input:checked+span:before{transform:translateX(20px)}
 
+.toast button{color:var(--accent);font-weight:750;margin-left:12px;pointer-events:auto}
+.toast.act{pointer-events:auto}
+.favs{display:flex;gap:7px;overflow-x:auto;margin:0 -16px 12px;padding:2px 16px 4px;scrollbar-width:none}
+.favs::-webkit-scrollbar{display:none}
+.fav{flex:none;padding:8px 12px;border-radius:12px;background:var(--card);border:1.5px solid var(--line);font-size:13.5px;font-weight:600;display:flex;flex-direction:column;align-items:flex-start;gap:1px;max-width:150px}
+.fav small{font-size:12px;color:var(--sub);font-weight:500}
+.fav span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:126px}
+.star{font-size:15px;color:var(--sub);padding:6px 2px}
+.star.on{color:var(--warn)}
+.alerts{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.alert{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:14px;padding:11px 12px 11px 14px;font-size:13.5px}
+.alert .mid{flex:1;min-width:0}
+.alert .mid b{display:block;font-weight:650}
+.alert .mid small{color:var(--sub);font-size:12.5px}
+.done{color:var(--accent);font-size:12.5px;font-weight:650;white-space:nowrap}
+.cal button .cardmark{position:absolute;top:3px;right:4px;font-size:9.5px;line-height:1}
+.cal button .d.hol{color:var(--danger)}
+.searchbox{position:relative;margin-bottom:12px}
+.searchbox input{padding-left:38px}
+.searchbox i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--sub);font-style:normal}
+.sres-head{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:2px 4px 8px}
 .toast{position:fixed;left:50%;bottom:calc(var(--tabh) + 18px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);
   background:var(--text);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14px;font-weight:600;opacity:0;transition:.25s;z-index:60;pointer-events:none;white-space:nowrap}
 .toast.on{opacity:1;transform:translateX(-50%)}
@@ -276,7 +297,7 @@ const DEFAULT_CATS = {
 const PALETTE = ['#0e9f5e','#e0794b','#4a7fd4','#d9a32a','#9b5fc0','#d2566f','#3aa3a0','#8a9a3c','#c07a46','#6c7bb8','#9aa296','#b5577f'];
 
 function blankState(){
-  return {v:1, accounts:[], txs:[], fixed:[], cats:JSON.parse(JSON.stringify(DEFAULT_CATS)),
+  return {v:1, accounts:[], txs:[], fixed:[], favs:[], cats:JSON.parse(JSON.stringify(DEFAULT_CATS)),
     budget:{default:0, months:{}}, settings:{url:'', key:'', lastBackup:'', dirty:false, lastErr:''}, updated:''};
 }
 let S;
@@ -309,7 +330,11 @@ const dObj = s => { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-
 const daysIn = ym => { const [y,m]=ym.split('-').map(Number); return new Date(y,m,0).getDate(); };
 const ymLabel = ym => `${ym.slice(0,4)}년 ${Number(ym.slice(5))}월`;
 const shortYM = ym => `${Number(ym.slice(5))}월`;
-function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('on'),1800); }
+function toast(msg, actLabel, actFn){
+  const t=$('#toast'); t.textContent=msg; t.classList.toggle('act', !!actFn);
+  if (actFn){ const b=document.createElement('button'); b.textContent=actLabel; b.onclick=()=>{ t.classList.remove('on'); actFn(); }; t.appendChild(b); }
+  t.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('on','act'), actFn?3500:1800);
+}
 
 const acc = id => S.accounts.find(a=>a.id===id);
 const accName = id => acc(id)?.name || '(삭제된 계좌)';
@@ -319,6 +344,42 @@ function catIcon(type, name){
 }
 // 체크카드는 연결 계좌로 돈이 빠짐
 const realAcc = id => { const a = acc(id); return (a && a.type==='check' && a.link) ? a.link : id; };
+
+/* ================= 공휴일·카드 결제일 ================= */
+// 2026~2028 공휴일·대체공휴일 (선거일 포함). 그 이후는 양력 공휴일만 자동 계산.
+const HOLIDAYS = {
+  '2026-01-01':'신정','2026-02-16':'설날 연휴','2026-02-17':'설날','2026-02-18':'설날 연휴','2026-03-01':'삼일절','2026-03-02':'대체공휴일',
+  '2026-05-01':'노동절','2026-05-05':'어린이날','2026-05-24':'부처님오신날','2026-05-25':'대체공휴일','2026-06-03':'지방선거','2026-06-06':'현충일',
+  '2026-07-17':'제헌절','2026-08-15':'광복절','2026-08-17':'대체공휴일','2026-09-24':'추석 연휴','2026-09-25':'추석','2026-09-26':'추석 연휴',
+  '2026-10-03':'개천절','2026-10-05':'대체공휴일','2026-10-09':'한글날','2026-12-25':'크리스마스',
+  '2027-01-01':'신정','2027-02-06':'설날 연휴','2027-02-07':'설날','2027-02-08':'설날 연휴','2027-02-09':'대체공휴일','2027-03-01':'삼일절',
+  '2027-05-01':'노동절','2027-05-03':'대체공휴일','2027-05-05':'어린이날','2027-05-13':'부처님오신날','2027-06-06':'현충일','2027-07-17':'제헌절',
+  '2027-07-19':'대체공휴일','2027-08-15':'광복절','2027-08-16':'대체공휴일','2027-09-14':'추석 연휴','2027-09-15':'추석','2027-09-16':'추석 연휴',
+  '2027-10-03':'개천절','2027-10-04':'대체공휴일','2027-10-09':'한글날','2027-10-11':'대체공휴일','2027-12-25':'크리스마스','2027-12-27':'대체공휴일',
+  '2028-01-01':'신정','2028-01-26':'설날 연휴','2028-01-27':'설날','2028-01-28':'설날 연휴','2028-03-01':'삼일절','2028-04-12':'국회의원 선거',
+  '2028-05-01':'노동절','2028-05-02':'부처님오신날','2028-05-05':'어린이날','2028-06-06':'현충일','2028-07-17':'제헌절','2028-08-15':'광복절',
+  '2028-10-02':'추석 연휴','2028-10-03':'추석·개천절','2028-10-04':'추석 연휴','2028-10-05':'대체공휴일','2028-10-09':'한글날','2028-12-25':'크리스마스',
+};
+const SOLAR = {'01-01':'신정','03-01':'삼일절','05-01':'노동절','05-05':'어린이날','06-06':'현충일','07-17':'제헌절','08-15':'광복절','10-03':'개천절','10-09':'한글날','12-25':'크리스마스'};
+function holidayName(ds){ if (HOLIDAYS[ds]) return HOLIDAYS[ds]; if (+ds.slice(0,4)>2028) return SOLAR[ds.slice(5)]||''; return ''; }
+function isOffDay(ds){ const w = dObj(ds).getDay(); return w===0 || w===6 || !!holidayName(ds); }
+function shiftDay(ds, n){ const d = dObj(ds); d.setDate(d.getDate()+n); return ymd(d); }
+// 해당 월의 원래 결제일과 실제 출금일
+function cardDue(a, ym){
+  const base = `${ym}-${pad(Math.min(Number(a.payDay), daysIn(ym)))}`;
+  let d = base; const rule = a.holiday||'next';
+  if (rule!=='none'){ let guard=0; while (isOffDay(d) && guard++<15) d = shiftDay(d, rule==='prev'?-1:1); }
+  return {base, date:d, moved: d!==base};
+}
+function nextDue(a){
+  if (a.type!=='credit' || !a.payDay) return null;
+  const td = today();
+  for (let i=-1;i<=1;i++){ const r = cardDue(a, addMonth(curYM(), i)); if (r.date>=td) return r; }
+  return null;
+}
+const mdLabel = ds => { const d=dObj(ds); return `${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`; };
+const dday = ds => { const n = Math.round((dObj(ds)-dObj(today()))/86400000); return n===0?'오늘':`D-${n}`; };
+const HOLIDAY_RULES = [['next','다음 영업일'],['prev','이전 영업일'],['none','그대로']];
 
 /* ================= 계산 ================= */
 function balances(){
@@ -362,7 +423,7 @@ function monthNav(){
 
 function render(){
   const top = $('#top'), v = $('#view');
-  if (UI.tab==='home'){ top.innerHTML = monthNav() + backupBadge(); v.innerHTML = viewHome(); }
+  if (UI.tab==='home'){ top.innerHTML = monthNav() + `<span style="display:flex;align-items:center;gap:4px"><button class="iconbtn" data-act="search" aria-label="검색"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>${backupBadge()}</span>`; v.innerHTML = viewHome(); }
   else if (UI.tab==='stats'){ top.innerHTML = monthNav() + backupBadge(); v.innerHTML = viewStats(); }
   else if (UI.tab==='assets'){ top.innerHTML = `<h1>자산</h1>` + backupBadge(); v.innerHTML = viewAssets(); }
   else { top.innerHTML = `<h1>더보기</h1>` + backupBadge(); v.innerHTML = viewMore(); }
@@ -377,11 +438,28 @@ function viewHome(){
     <div><span>수입</span><b class="num in">${won(inc)}</b></div>
     <div><span>지출</span><b class="num out">${won(out)}</b></div>
     <div><span>합계</span><b class="num">${wonS(inc-out)}</b></div></div>${budgetBlock(UI.ym,out)}</div>`;
+  if (UI.ym===curYM()) h += alertsBlock();
   h += `<div class="seg">${[['list','목록'],['cal','달력'],['week','주별']].map(([k,l])=>`<button data-act="mode" data-v="${k}" class="${UI.mode===k?'on':''}">${l}</button>`).join('')}</div>`;
   if (UI.mode==='cal') h += calView(list);
   else if (UI.mode==='week') h += weekView(list);
   else h += dayList(list);
   return h;
+}
+function fixedDone(f, ym){ return S.txs.some(t=>t.fixedId===f.id && ymOf(t.date)===ym); }
+function alertsBlock(){
+  const td = today(), dNow = new Date().getDate(), ym = curYM(), bal = balances(), items = [];
+  for (const a of S.accounts.filter(a=>a.type==='credit' && !a.hidden)){
+    const nd = nextDue(a), owed = -(bal[a.id]||0);
+    if (!nd || owed<=0) continue;
+    const days = Math.round((dObj(nd.date)-dObj(td))/86400000);
+    if (days<=7) items.push(`<div class="alert"><span class="ico">💳</span><div class="mid"><b>${esc(a.name)} 결제 ${dday(nd.date)}</b>
+      <small>${mdLabel(nd.date)}${nd.moved?` (원래 ${Number(nd.base.slice(8))}일)`:''} · ${won(owed)}원</small></div><button class="btn sm ghost" data-act="payCard" data-id="${a.id}">결제 기록</button></div>`);
+  }
+  for (const f of S.fixed.filter(f=>f.active!==false && f.day && f.day<=dNow && !fixedDone(f, ym))){
+    items.push(`<div class="alert"><span class="ico">🔁</span><div class="mid"><b>${esc(f.name)} 기록 안 됨</b><small>매달 ${f.day}일 · ${won(f.amount)}원</small></div>
+      <button class="btn sm ghost" data-act="recordFixed" data-id="${f.id}">기록</button></div>`);
+  }
+  return items.length ? `<div class="alerts">${items.join('')}</div>` : '';
 }
 function budgetBlock(ym, out){
   const b = budgetOf(ym);
@@ -430,6 +508,10 @@ function calView(list){
   const per = {};
   for (const t of list){ const p = per[t.date] ||= {in:0,out:0,tr:0}; p[t.type]+=Number(t.amount)||0; }
   const maxOut = Math.max(1, ...Object.values(per).map(p=>p.out));
+  const dues = {};
+  for (const a of S.accounts.filter(a=>a.type==='credit' && a.payDay && !a.hidden)){
+    for (const m of [addMonth(ym,-1), ym]){ const r = cardDue(a, m); if (ymOf(r.date)===ym) (dues[r.date] ||= []).push(a.name); }
+  }
   const cells = [];
   for (let i=0;i<first;i++) cells.push(null);
   for (let d=1; d<=n; d++) cells.push(d);
@@ -443,17 +525,20 @@ function calView(list){
       const ds = `${ym}-${pad(d)}`, p = per[ds], dow = c;
       if (p){ wOut+=p.out; wIn+=p.in; }
       const heat = p && p.out ? (0.1 + 0.55*p.out/maxOut).toFixed(2) : 0;
-      h += `<button data-act="selDay" data-v="${ds}" class="${ds===td?'today':''} ${ds===UI.selDay?'sel':''} ${ds>td?'future':''}" style="--heat:${heat}">
-        <span class="d ${dow===0?'sun':dow===6?'sat':''}">${d}</span>
+      const hol = holidayName(ds);
+      h += `<button data-act="selDay" data-v="${ds}" class="${ds===td?'today':''} ${ds===UI.selDay?'sel':''} ${ds>td?'future':''}" style="--heat:${heat}" ${hol?`title="${hol}"`:''}>
+        ${dues[ds]?`<span class="cardmark" title="${esc(dues[ds].join(', '))} 결제일">💳</span>`:''}
+        <span class="d ${dow===0||hol?'sun':dow===6?'sat':''}">${d}</span>
         ${p&&p.in?`<span class="num in">+${compact(p.in)}</span>`:''}${p&&p.out?`<span class="num out">−${compact(p.out)}</span>`:''}
         ${p&&p.tr&&!p.in&&!p.out?`<span class="trdot" title="이체">•</span>`:''}</button>`;
     }
     const firstDay = cells.slice(r,r+7).find(x=>x!=null), weekFuture = `${ym}-${pad(firstDay)}` > td;
     h += `<div class="wsum num">${wIn?`<span class="in">+${won(wIn)}</span>`:''}${wOut?`<span class="out">−${won(wOut)}</span>`:(weekFuture?'':'<span class="faint">지출 없음</span>')}</div>`;
   }
-  h += `</div><div class="calkey"><span><i></i>지출이 많은 날일수록 진하게</span><span>1.3만 = 13,000원</span></div></div>`;
+  h += `</div><div class="calkey"><span><i></i>지출이 많은 날일수록 진하게</span><span>💳 카드 결제일</span></div></div>`;
   if (UI.selDay && ymOf(UI.selDay)===ym){
-    const dd = dObj(UI.selDay);
+    const dd = dObj(UI.selDay), hol = holidayName(UI.selDay);
+    if (hol || dues[UI.selDay]) h += `<p class="hint" style="padding:0 4px">${hol?`🎌 ${hol}`:''}${hol&&dues[UI.selDay]?' · ':''}${dues[UI.selDay]?`💳 ${esc(dues[UI.selDay].join(', '))} 결제일`:''}</p>`;
     h += dayList(list.filter(t=>t.date===UI.selDay), `${dd.getMonth()+1}월 ${dd.getDate()}일은 내역이 없어요`);
   }
   return h;
@@ -568,7 +653,8 @@ function viewAssets(){
     for (const a of list){
       let right, sub='';
       if (type==='check'){ right=''; sub = a.link ? `${esc(accName(a.link))}에서 출금` : '연결 계좌 없음'; }
-      else if (type==='credit'){ const b=bal[a.id]||0; right = `<span class="num ${b<0?'up':''}">${won(b)}</span>`; sub = b<0 ? `갚을 카드값 ${won(-b)}원` : '미결제 없음'; }
+      else if (type==='credit'){ const b=bal[a.id]||0, nd=nextDue(a); right = `<span class="num ${b<0?'up':''}">${won(b)}</span>`;
+        sub = (b<0 ? `갚을 카드값 ${won(-b)}원` : '미결제 없음') + (nd ? ` · 다음 결제 ${mdLabel(nd.date)}${nd.moved?'↪':''}` : (a.payDay?'':' · 결제일 미설정')); }
       else if (type==='invest'){
         const p = bal[a.id]||0, hasV = a.value!=null && a.value!=='';
         const v = hasV ? Number(a.value) : p, pl = v-p, r = p? pl/p*100 : 0;
@@ -593,15 +679,24 @@ function viewMore(){
   const dToday = new Date().getDate();
   let h = `<div class="card"><div class="grouphead"><h3>🔁 고정지출</h3><span class="num muted" style="font-size:13px">월 ${won(fixedSum)}원</span></div>`;
   if (!S.fixed.length) h += `<p class="hint">통신비, 구독료처럼 매달 나가는 돈을 적어두세요.</p>`;
+  const doneN = fixedOn.filter(f=>fixedDone(f, curYM())).length;
+  if (fixedOn.length) h += `<p class="hint" style="margin:-2px 0 4px">이번 달 ${doneN}/${fixedOn.length}개 기록함</p>`;
   for (const f of S.fixed.slice().sort((a,b)=>(a.day||99)-(b.day||99))){
-    const soon = f.active!==false && f.day && f.day>=dToday && f.day-dToday<=3;
+    const done = f.active!==false && fixedDone(f, curYM());
+    const soon = !done && f.active!==false && f.day && f.day>=dToday && f.day-dToday<=3;
+    const late = !done && f.active!==false && f.day && f.day<dToday;
     h += `<div class="cell"><button style="flex:1;text-align:left" data-act="editFixed" data-id="${f.id}"><b style="font-weight:600${f.active===false?';opacity:.45':''}">${esc(f.name)}</b><br>
-      <small>${f.day?`매달 ${f.day}일`:'날짜 없음'}${f.acc?` · ${esc(accName(f.acc))}`:''}${soon?' · <span style="color:var(--warn)">곧 결제</span>':''}${f.active===false?' · 중지':''}</small></button>
+      <small>${f.day?`매달 ${f.day}일`:'날짜 없음'}${f.acc?` · ${esc(accName(f.acc))}`:''}${soon?' · <span style="color:var(--warn)">곧 결제</span>':''}${late?' · <span style="color:var(--danger)">기록 안 됨</span>':''}${f.active===false?' · 중지':''}</small></button>
       <span class="num" style="font-weight:650">${won(f.amount)}</span>
-      <button class="btn sm ghost" data-act="recordFixed" data-id="${f.id}">기록</button></div>`;
+      ${done?`<span class="done">✓ 기록함</span>`:(f.active===false?'':`<button class="btn sm ghost" data-act="recordFixed" data-id="${f.id}">기록</button>`)}</div>`;
   }
   h += `<button class="addlink" data-act="newFixed">+ 고정지출 추가</button></div>`;
 
+  h += `<div class="card"><div class="grouphead"><h3>⭐ 자주 쓰는 내역</h3><span class="muted" style="font-size:13px">${S.favs.length}개</span></div>`;
+  if (!S.favs.length) h += `<p class="hint">내역을 입력할 때 오른쪽 위 ☆를 누르면 여기에 저장돼요. 다음부터는 + 화면 위쪽에서 한 번 눌러 바로 기록할 수 있어요.</p>`;
+  S.favs.forEach((f,k)=>{ h += `<div class="cell"><span><b style="font-weight:600">${esc(favTitle(f))}</b><br><small>${favSub(f)}</small></span>
+    <span><button class="iconbtn" data-act="favUp" data-v="${k}" aria-label="위로">↑</button><button class="iconbtn" data-act="favDel" data-v="${k}" aria-label="삭제" style="color:var(--danger)">✕</button></span></div>`; });
+  h += `</div>`;
   const th = getTheme();
   h += `<div class="card"><h3>🎨 화면 모드</h3><div class="seg" style="margin:0">${[['auto','자동'],['light','라이트'],['dark','다크']].map(([k,l])=>`<button data-act="theme" data-v="${k}" class="${th===k?'on':''}">${l}</button>`).join('')}</div>
     <p class="hint">자동은 아이폰 설정(라이트/다크)을 따라가요.</p></div>`;
@@ -649,7 +744,8 @@ function accChips(field, filter, order){
 }
 function drawTxForm(){
   const T = F.type;
-  let h = head(F.id?'내역 수정':'내역 추가');
+  let h = head(F.id?'내역 수정':'내역 추가', `<button class="star ${F.fav?'on':''}" data-act="favToggle" aria-label="즐겨찾기">${F.fav?'★':'☆'}</button>`);
+  if (!F.id && S.favs.length) h += `<div class="favs">${S.favs.map((f,k)=>`<button class="fav" data-act="useFav" data-v="${k}"><span>${catIcon(f.type,f.cat)} ${esc(favTitle(f))}</span><small class="num">${f.amount?won(f.amount)+'원':'금액 입력'}</small></button>`).join('')}</div>`;
   h += `<div class="seg">${[['out','지출'],['in','수입'],['tr','이체']].map(([k,l])=>`<button data-act="ftype" data-v="${k}" class="${T===k?'on':''}">${l}</button>`).join('')}</div>`;
   h += `<div class="amountbox"><input id="amt" inputmode="numeric" autocomplete="off" placeholder="0" value="${F.amount?won(F.amount):''}"><span>원</span></div>`;
   h += `<div class="quick">${[1000,5000,10000,50000].map(n=>`<button data-act="addAmt" data-v="${n}">+${n>=10000?n/10000+'만':won(n)}</button>`).join('')}<button data-act="addAmt" data-v="0">지우기</button></div>`;
@@ -671,6 +767,12 @@ function drawTxForm(){
   amt.addEventListener('input', ()=>{ F.amount = parseAmt(amt.value); amt.value = F.amount? won(F.amount):''; });
   if (!F.id) setTimeout(()=>amt.focus(), 280);
 }
+function favTitle(f){ return f.memo || f.cat || (f.type==='tr' ? '이체' : ''); }
+function favSub(f){
+  const where = f.type==='tr' ? `${accName(f.from)} → ${accName(f.to)}` : accName(f.type==='out'?f.from:f.to);
+  return `${f.amount?won(f.amount)+'원':'금액 직접 입력'} · ${esc(where)}`;
+}
+function sameFav(a,b){ return a.type===b.type && a.cat===b.cat && a.from===b.from && a.to===b.to && a.memo===b.memo && Number(a.amount)===Number(b.amount); }
 function readTxInputs(){ F.amount = parseAmt($('#amt').value); F.date = $('#fdate').value || today(); F.memo = $('#fmemo').value.trim(); }
 function saveTx(){
   readTxInputs();
@@ -686,8 +788,30 @@ function saveTx(){
   if (rec.type==='out') S.settings.last.out = rec.from;
   if (rec.type==='in') S.settings.last.in = rec.to;
   if (rec.type==='tr'){ S.settings.last.trFrom = rec.from; S.settings.last.trTo = rec.to; }
+  if (F.fav){ const fv = {id:uid(), type:rec.type, amount:rec.amount, cat:rec.cat, from:rec.from, to:rec.to, memo:rec.memo};
+    if (!S.favs.some(x=>sameFav(x,fv))) S.favs.push(fv); }
   persist(); closeSheet();
   UI.ym = ymOf(rec.date); render(); toast(i>=0?'수정했어요':'저장했어요');
+}
+
+/* ---- 검색 ---- */
+function searchForm(){
+  openSheet(head('내역 검색') + `<div class="searchbox"><i>🔍</i><input class="field" id="sq" placeholder="내용, 카테고리, 카드, 금액" autocomplete="off" value="${esc(UI.q||'')}"></div><div id="sres"></div>`);
+  const q = $('#sq'); q.addEventListener('input', ()=>{ UI.q = q.value; drawSearch(); }); drawSearch(); setTimeout(()=>q.focus(), 280);
+}
+function drawSearch(){
+  const q = (UI.q||'').trim().toLowerCase(), box = $('#sres'); if (!box) return;
+  if (!q){ box.innerHTML = `<p class="hint" style="text-align:center;padding:20px 0">예: 편의점, 카페, 마이위시, 4500</p>`; return; }
+  const terms = q.split(/\s+/);
+  const hits = sortTx(S.txs.filter(t=>{
+    const hay = [t.memo, t.cat, accName(t.from), accName(t.to), String(t.amount), won(t.amount), t.date, {out:'지출',in:'수입',tr:'이체'}[t.type]].join(' ').toLowerCase();
+    return terms.every(w=>hay.includes(w.replace(/,/g,'')) || hay.includes(w));
+  }));
+  if (!hits.length){ box.innerHTML = `<div class="empty"><b>🔎</b>'${esc(UI.q)}' 검색 결과가 없어요</div>`; return; }
+  const o = sumBy(hits,'out'), i = sumBy(hits,'in'), shown = hits.slice(0,200);
+  const byYM = {}; shown.forEach(t=>(byYM[ymOf(t.date)] ||= []).push(t));
+  box.innerHTML = `<div class="sres-head"><span>${hits.length}건${hits.length>200?' (최근 200건 표시)':''}</span><span class="num">${o?`지출 ${won(o)}`:''}${o&&i?' · ':''}${i?`<span class="in">수입 ${won(i)}</span>`:''}</span></div>` +
+    Object.keys(byYM).sort().reverse().map(m=>`<div class="label" style="margin-top:6px">${ymLabel(m)}</div><div class="txs">${byYM[m].map(t=>txRow(t).replace('<small>', `<small>${Number(t.date.slice(5,7))}/${Number(t.date.slice(8))} · `)).join('')}</div>`).join('');
 }
 
 /* ---- 계좌 ---- */
@@ -705,6 +829,14 @@ function drawAccForm(){
   } else if (T==='credit'){
     h += `<div class="label">시작 시점 미결제 금액</div><input class="field" id="astart" inputmode="numeric" placeholder="0" value="${F.start? won(Math.abs(F.start)):''}">
       <p class="hint">아직 안 갚은 카드값이 있으면 적어주세요. 결제 계좌에서 이 카드로 '이체'하면 갚은 걸로 처리돼요.</p>`;
+    h += `<div class="label">매달 결제일</div><input class="field" id="apayday" inputmode="numeric" placeholder="예: 14" value="${F.payDay||''}">`;
+    h += `<div class="label">결제일이 주말·공휴일이면</div><div class="chips">${HOLIDAY_RULES.map(([k,l])=>`<button class="chip ${(F.holiday||'next')===k?'on':''}" data-act="aset" data-f="holiday" data-v="${k}">${l}</button>`).join('')}</div>
+      <p class="hint">대부분의 카드사는 '다음 영업일'에 출금해요. 카드사 앱이나 명세서에서 확인해 보세요.</p>`;
+    h += `<div class="label">결제 계좌</div><div class="chips">${S.accounts.filter(x=>['bank','pay'].includes(x.type)&&!x.hidden).map(x=>`<button class="chip ${F.payAcc===x.id?'on':''}" data-act="aset" data-f="payAcc" data-v="${x.id}">${esc(x.name)}</button>`).join('')}</div>`;
+    if (F.payDay){
+      const ups = [0,1,2].map(i=>cardDue({payDay:F.payDay, holiday:F.holiday}, addMonth(curYM(), i)));
+      h += `<div class="card" style="margin-top:12px;padding:12px 14px"><h3 style="margin-bottom:6px">다가오는 결제일</h3>${ups.map(u=>`<div class="row" style="padding:3px 0;font-size:14px"><span>${mdLabel(u.date)}</span><small class="${u.moved?'':'faint'}" style="color:${u.moved?'var(--warn)':''}">${u.moved?`원래 ${mdLabel(u.base)} · ${esc(holidayName(u.base)||'주말')}`:'정상'}</small></div>`).join('')}</div>`;
+    }
   } else {
     h += `<div class="label">${T==='invest'?'시작 시점 투자 원금':'시작 잔액'}</div><input class="field" id="astart" inputmode="numeric" placeholder="0" value="${F.start? won(F.start):''}">
       <p class="hint">${F.id?'지금까지 기록한 내역은 이 금액에서 더하고 빼져요.':'오늘 기준 잔액을 적어주세요.'}</p>`;
@@ -714,6 +846,7 @@ function drawAccForm(){
       <p class="hint">증권사·거래소 앱에서 본 금액을 가끔 업데이트하면 손익이 보여요. 투자금 입금은 계좌 → 이 항목으로 '이체'로 기록하세요.</p>`;
   }
   h += `<div class="label">메모 (선택)</div><input class="field" id="amemo" placeholder="예: 결제일 15일" value="${esc(F.memo)}">`;
+  if (F.id && T==='credit' && (bal[F.id]||0)<0) h += `<button class="btn ghost" style="margin-top:14px" data-act="payCard" data-id="${F.id}">카드값 ${won(-(bal[F.id]||0))}원 결제 기록하기</button>`;
   if (F.id){
     h += `<div class="cell" style="margin-top:10px"><span>목록에서 숨기기<br><small>안 쓰는 계좌 (내역은 유지)</small></span><label class="toggle"><input type="checkbox" id="ahidden" ${F.hidden?'checked':''}><span></span></label></div>`;
     if (T!=='check') h += `<p class="hint">현재 계산된 금액: <b class="num">${won(bal[F.id]||0)}원</b></p>`;
@@ -721,6 +854,7 @@ function drawAccForm(){
   h += `<div class="btns"><button class="btn" data-act="saveAcc">저장</button>${F.id?`<button class="btn danger" data-act="delAcc">삭제</button>`:''}</div>`;
   openSheet(h);
   document.querySelectorAll('#astart,#avalue').forEach(el=>el.addEventListener('input',()=>{const n=parseAmt(el.value); el.value=n?won(n):'';}));
+  const pd = $('#apayday'); if (pd) pd.addEventListener('change', ()=>{ readAccInputs(); drawAccForm(); });
 }
 function readAccInputs(){
   F.name = $('#aname').value.trim();
@@ -728,6 +862,7 @@ function readAccInputs(){
   const v = $('#avalue'); if (v) F.value = v.value.trim()===''? '' : parseAmt(v.value);
   F.memo = $('#amemo').value.trim();
   const hd = $('#ahidden'); if (hd) F.hidden = hd.checked;
+  const pd = $('#apayday'); if (pd) F.payDay = Math.min(31, parseAmt(pd.value)) || '';
 }
 function saveAcc(){
   readAccInputs();
@@ -736,7 +871,9 @@ function saveAcc(){
   if (F.type==='check') F.start = 0;
   if (F.type!=='check') F.link = '';
   if (F.type!=='invest') F.value = '';
-  const rec = {id:F.id||uid(), name:F.name, type:F.type, start:F.start||0, link:F.link||'', value:F.value??'', memo:F.memo, hidden:!!F.hidden};
+  const credit = F.type==='credit';
+  const rec = {id:F.id||uid(), name:F.name, type:F.type, start:F.start||0, link:F.link||'', value:F.value??'', memo:F.memo, hidden:!!F.hidden,
+    payDay: credit ? (F.payDay||'') : '', holiday: credit ? (F.holiday||'next') : '', payAcc: credit ? (F.payAcc||'') : ''};
   const i = S.accounts.findIndex(a=>a.id===rec.id);
   if (i>=0) S.accounts[i]=rec; else S.accounts.push(rec);
   persist(); closeSheet(); render(); toast('저장했어요');
@@ -929,6 +1066,23 @@ document.addEventListener('click', async e=>{
     case 'clearBackupCfg': if (confirm('백업 연결을 해제할까요? (시트의 데이터는 그대로 있어요)')){ S.settings.url=''; S.settings.key=''; persist(false); closeSheet(); render(); } break;
     case 'backupNow': S.settings.dirty=true; backupNow(true); break;
     case 'restore': restore(); break;
+    case 'search': searchForm(); break;
+    case 'favToggle': readTxInputs(); F.fav = !F.fav; drawTxForm(); if (F.fav) toast('저장할 때 즐겨찾기에도 추가돼요'); break;
+    case 'useFav': { const f = S.favs[+v]; if (!f) break;
+      if (f.type==='out' && !acc(f.from) || f.type==='in' && !acc(f.to) || f.type==='tr' && (!acc(f.from)||!acc(f.to))){ toast('즐겨찾기의 계좌가 삭제됐어요'); break; }
+      const date = $('#fdate')?.value || today();
+      if (!f.amount){ F = Object.assign({id:null, date, fixedId:''}, {type:f.type, amount:0, cat:f.cat, from:f.from, to:f.to, memo:f.memo}); drawTxForm(); break; }
+      const now = new Date().toISOString();
+      const rec = {id:uid(), type:f.type, amount:f.amount, date, cat:f.cat, from:f.from, to:f.to, memo:f.memo, fixedId:'', created:now, updated:now};
+      S.txs.push(rec); persist(); closeSheet(); UI.ym = ymOf(date); render();
+      toast(`${favTitle(f)} ${won(f.amount)}원 기록했어요`, '취소', ()=>{ S.txs = S.txs.filter(t=>t.id!==rec.id); persist(); render(); toast('취소했어요'); });
+      break; }
+    case 'favUp': { const k=+v; if (k>0){ [S.favs[k-1],S.favs[k]]=[S.favs[k],S.favs[k-1]]; persist(); render(); } break; }
+    case 'favDel': if (confirm(`'${favTitle(S.favs[+v])}' 즐겨찾기를 지울까요?`)){ S.favs.splice(+v,1); persist(); render(); } break;
+    case 'payCard': { const a = acc(id); if (!a) break; const owed = -(balances()[a.id]||0);
+      const nd = nextDue(a), td = today();
+      const date = nd && nd.date<=td ? nd.date : td;
+      closeSheet(); setTimeout(()=>txForm(null, {type:'tr', from:a.payAcc||'', to:a.id, amount:owed>0?owed:0, memo:`${a.name} 카드값`, date}), 60); break; }
     case 'theme': try{ localStorage.setItem('gagyebu_theme', v); }catch(_){} applyTheme(v); render(); break;
     case 'exportJson': {
       const blob = new Blob([JSON.stringify(exportData(),null,1)],{type:'application/json'});
