@@ -1,5 +1,5 @@
 // 오프라인에서도 앱이 열리도록 파일을 캐시해요. 앱을 고치면 VERSION 숫자를 올리세요.
-const VERSION = 'gagyebu-v6';
+const VERSION = 'gagyebu-v7';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

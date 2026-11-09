@@ -391,6 +391,7 @@ function cyclePeriod(a, dueYM){
 // 특정 날짜 기준 카드에 남은 미결제액
 function cardOwedAt(a, d){
   let b = Number(a.start)||0;
+  if (a.startCycle && a.startDate && d < a.startDate) b += Number(a.startCycle); // 맞추기 이전 시점엔 이번 기간 사용분이 아직 없음
   for (const t of S.txs){
     if (t.date>d) continue;
     const amt = Number(t.amount)||0;
@@ -402,7 +403,8 @@ function cardOwedAt(a, d){
 // 결제 한 번의 청구 정보: 이용기간, 기간 중 사용액, 결제할 금액(이전 미결제 포함, 이후 납부 차감)
 function statement(a, due){
   const per = cyclePeriod(a, ymOf(due.base)); if (!per) return null;
-  const used = S.txs.filter(t=>t.from===a.id && (t.type==='out') && t.date>=per.start && t.date<=per.end).reduce((x,t)=>x+Number(t.amount),0);
+  let used = S.txs.filter(t=>t.from===a.id && (t.type==='out') && t.date>=per.start && t.date<=per.end).reduce((x,t)=>x+Number(t.amount),0);
+  if (a.startCycle && a.startDate && a.startDate>=per.start && a.startDate<=per.end) used += Number(a.startCycle);
   const paidAfter = S.txs.filter(t=>t.type==='tr' && t.to===a.id && t.date>per.end).reduce((x,t)=>x+Number(t.amount),0);
   const amount = Math.max(0, cardOwedAt(a, per.end) - paidAfter);
   return {...per, used, amount, open: today()<=per.end};
@@ -704,7 +706,7 @@ function viewAssets(){
     }
     h += `</div>`;
   }
-  h += `<button class="btn ghost" data-act="newAcc">+ 계좌·카드 추가</button>`;
+  h += `<div class="btns" style="margin-top:0"><button class="btn ghost" data-act="newAcc">+ 계좌·카드 추가</button><button class="btn ghost" data-act="adjust">오늘 기준으로 잔액 맞추기</button></div>`;
   const hidden = S.accounts.filter(a=>a.hidden);
   if (hidden.length) h += `<p class="hint" style="text-align:center;margin-top:14px">숨긴 계좌 ${hidden.length}개 · <button class="addlink" data-act="showHidden">보기</button></p>`;
   if (UI.showHidden) h += `<div class="card" style="margin-top:8px">${hidden.map(a=>`<button class="acc" data-act="editAcc" data-id="${a.id}"><span class="ico">${ACC_TYPES[a.type].icon}</span><span class="mid"><b>${esc(a.name)}</b><small>숨김</small></span></button>`).join('')}</div>`;
@@ -731,6 +733,7 @@ function viewMore(){
   }
   h += `<button class="addlink" data-act="newFixed">+ 고정지출 추가</button></div>`;
 
+  h += `<div class="card"><button class="cell" data-act="adjust" style="padding:2px 0"><span><b style="font-weight:650">⚖️ 오늘 기준으로 잔액 맞추기</b><br><small>은행·카드 앱의 지금 금액을 입력하면 그대로 맞춰져요</small></span><span class="chev">›</span></button></div>`;
   h += `<div class="card"><div class="grouphead"><h3>⭐ 자주 쓰는 내역</h3><span class="muted" style="font-size:13px">${S.favs.length}개</span></div>`;
   if (!S.favs.length) h += `<p class="hint">내역을 입력할 때 오른쪽 위 ☆를 누르면 여기에 저장돼요. 다음부터는 + 화면 위쪽에서 한 번 눌러 바로 기록할 수 있어요.</p>`;
   S.favs.forEach((f,k)=>{ h += `<div class="cell"><span><b style="font-weight:600">${esc(favTitle(f))}</b><br><small>${favSub(f)}</small></span>
@@ -831,6 +834,66 @@ function saveTx(){
     if (!S.favs.some(x=>sameFav(x,fv))) S.favs.push(fv); }
   persist(); closeSheet();
   UI.ym = ymOf(rec.date); render(); toast(i>=0?'수정했어요':'저장했어요');
+}
+
+/* ---- 오늘 기준 잔액 맞추기 ---- */
+function adjustForm(){
+  const bal = balances(), td = today();
+  const list = S.accounts.filter(a=>!a.hidden && a.type!=='check');
+  let h = head('잔액 맞추기');
+  h += `<p class="hint" style="margin:-4px 0 12px">은행·카드·증권 앱에 지금 보이는 금액을 적어주세요. 이미 맞는 칸은 그대로 두면 돼요. 지나간 내역을 하나하나 입력하지 않아도 오늘부터 정확하게 시작할 수 있어요.</p>`;
+  const groups = [['bank','pay','saving'],['credit'],['invest']];
+  for (const g of groups){
+    const items = list.filter(a=>g.includes(a.type)); if (!items.length) continue;
+    h += `<div class="card">`;
+    for (const a of items){
+      if (a.type==='credit'){
+        const nd = nextDue(a), per = nd && cyclePeriod(a, ymOf(nd.base)), curPer = cyclePeriod(a, addMonth(ymOf((nd||{base:td}).base), 1));
+        const st = nd && statement(a, nd);
+        const curUsed = curPer ? S.txs.filter(t=>t.from===a.id&&t.type==='out'&&t.date>=curPer.start&&t.date<=td).reduce((x,t)=>x+Number(t.amount),0) + ((a.startCycle&&a.startDate>=curPer.start)?Number(a.startCycle):0) : 0;
+        h += `<div style="padding:8px 0"><b style="font-weight:650">💳 ${esc(a.name)}</b>
+          <div class="label" style="margin-top:8px">${nd?`${mdLabel(nd.date)}에 빠질 금액${per?` (${rangeLabel(per.start,per.end)} 사용분)`:''}`:'다음 결제일에 빠질 금액 (청구 확정)'}</div>
+          <input class="field adj" data-id="${a.id}" data-k="billed" inputmode="numeric" value="${won(st?st.amount:Math.max(0,-(bal[a.id]||0)))}">
+          ${a.cycleDay&&curPer?`<div class="label">${rangeLabel(curPer.start, td)} 사용한 금액 (다음 달 청구분)</div>
+          <input class="field adj" data-id="${a.id}" data-k="cycle" inputmode="numeric" value="${won(curUsed)}">
+          <p class="hint">카드사 앱의 '결제 예정 금액'과 '이용 내역 합계'를 보고 적어주세요. 이미 결제했으면 위 칸은 0으로.</p>`:`<p class="hint">이용기간을 설정하면 다음 달 청구분도 따로 맞출 수 있어요.</p>`}</div>`;
+      } else if (a.type==='invest'){
+        h += `<div style="padding:8px 0"><b style="font-weight:650">📈 ${esc(a.name)}</b>
+          <div class="fieldrow"><div><div class="label">투자 원금</div><input class="field adj" data-id="${a.id}" data-k="bal" inputmode="numeric" value="${won(bal[a.id]||0)}"></div>
+          <div><div class="label">현재 평가액</div><input class="field adj" data-id="${a.id}" data-k="value" inputmode="numeric" placeholder="선택" value="${a.value!==''&&a.value!=null?won(a.value):''}"></div></div></div>`;
+      } else {
+        h += `<div class="row" style="padding:7px 0"><span style="flex:1">${ACC_TYPES[a.type].icon} ${esc(a.name)}</span>
+          <input class="field adj" data-id="${a.id}" data-k="bal" inputmode="numeric" value="${won(bal[a.id]||0)}" style="flex:0 0 52%;text-align:right"></div>`;
+      }
+    }
+    h += `</div>`;
+  }
+  h += `<div class="btns"><button class="btn" data-act="saveAdjust">이 금액으로 맞추기</button></div>`;
+  openSheet(h);
+  document.querySelectorAll('.adj').forEach(el=>el.addEventListener('input',()=>{ const n=parseAmt(el.value); el.value = el.value.trim()===''?'':won(n); }));
+}
+function saveAdjust(){
+  const bal = balances(), td = today(), vals = {};
+  document.querySelectorAll('.adj').forEach(el=>{ (vals[el.dataset.id] ||= {})[el.dataset.k] = el.value.trim()===''? null : parseAmt(el.value); });
+  let changed = 0;
+  for (const [id, v] of Object.entries(vals)){
+    const a = acc(id); if (!a) continue;
+    if (a.type==='credit'){
+      const nd = nextDue(a), curPer = cyclePeriod(a, addMonth(ymOf((nd||{base:td}).base), 1));
+      const billed = v.billed||0, cycleTotal = v.cycle||0;
+      const recorded = curPer ? S.txs.filter(t=>t.from===a.id&&t.type==='out'&&t.date>=curPer.start&&t.date<=td).reduce((x,t)=>x+Number(t.amount),0) : 0;
+      const extraCycle = Math.max(0, cycleTotal - recorded);
+      let net = 0; for (const t of S.txs){ const m=Number(t.amount)||0; if ((t.type==='out'||t.type==='tr')&&t.from===a.id) net-=m; if ((t.type==='in'||t.type==='tr')&&t.to===a.id) net+=m; }
+      const target = -(billed + Math.max(cycleTotal, recorded));
+      const newStart = target - net;
+      if (newStart!==Number(a.start) || extraCycle!==Number(a.startCycle||0)){ a.start = newStart; a.startCycle = extraCycle; a.startDate = td; changed++; }
+    } else {
+      if (v.bal!=null && v.bal!==(bal[id]||0)){ a.start = (Number(a.start)||0) + (v.bal - (bal[id]||0)); a.startDate = td; changed++; }
+      if (a.type==='invest' && v.value!==undefined){ const nv = v.value==null?'':v.value; if (nv!==a.value){ a.value = nv; changed++; } }
+    }
+  }
+  closeSheet();
+  if (changed){ persist(); render(); toast('오늘 기준으로 맞췄어요'); } else toast('바뀐 금액이 없어요');
 }
 
 /* ---- 검색 ---- */
@@ -1119,6 +1182,8 @@ document.addEventListener('click', async e=>{
     case 'backupNow': S.settings.dirty=true; backupNow(true); break;
     case 'restore': restore(); break;
     case 'search': searchForm(); break;
+    case 'adjust': adjustForm(); break;
+    case 'saveAdjust': saveAdjust(); break;
     case 'favToggle': readTxInputs(); F.fav = !F.fav; drawTxForm(); if (F.fav) toast('저장할 때 즐겨찾기에도 추가돼요'); break;
     case 'useFav': { const f = S.favs[+v]; if (!f) break;
       if (f.type==='out' && !acc(f.from) || f.type==='in' && !acc(f.to) || f.type==='tr' && (!acc(f.from)||!acc(f.to))){ toast('즐겨찾기의 계좌가 삭제됐어요'); break; }
