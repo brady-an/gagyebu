@@ -93,15 +93,25 @@ main{padding:4px 16px 24px;max-width:560px;margin:0 auto}
 .empty b{display:block;font-size:30px;margin-bottom:6px}
 
 /* calendar */
-.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
-.cal .wd{text-align:center;font-size:12px;color:var(--sub);padding:4px 0}
-.cal .wd:first-child{color:var(--out)} .cal .wd:last-child{color:var(--in)}
-.cal button{min-height:58px;border-radius:10px;padding:4px 2px;display:flex;flex-direction:column;align-items:center;gap:1px;font-size:10.5px}
-.cal button .d{font-size:13px;font-weight:600}
-.cal button.today .d{background:var(--accent);color:#fff;border-radius:99px;width:22px;height:22px;display:grid;place-items:center}
-.cal button.sel{background:var(--accent-soft)}
-.cal button.blank{visibility:hidden}
-
+.calcard{padding:10px 6px 12px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal .wd{text-align:center;font-size:12px;color:var(--sub);padding:2px 0 6px}
+.cal .wd:first-child{color:var(--out)} .cal .wd:nth-child(7){color:var(--in)}
+.cal button{min-height:60px;border-radius:10px;padding:5px 1px 4px;display:flex;flex-direction:column;align-items:center;gap:1px;font-size:11px;line-height:1.25;
+  background:color-mix(in srgb,var(--out) calc(var(--heat,0)*100%),transparent);position:relative}
+@media (prefers-color-scheme: dark){ .cal button{background:color-mix(in srgb,var(--out) calc(var(--heat,0)*70%),transparent)} }
+.cal button .d{font-size:13px;font-weight:650;width:22px;height:22px;display:grid;place-items:center;border-radius:99px}
+.cal button .d.sun{color:var(--out)} .cal button .d.sat{color:var(--in)}
+.cal button.today .d{background:var(--accent);color:#fff}
+.cal button.sel{outline:2px solid var(--accent);outline-offset:-2px}
+.cal button.future .d{opacity:.45}
+.cal button .out{color:var(--text);font-weight:650}
+.cal button .trdot{color:var(--tr);font-size:14px;line-height:1}
+.cal .blank{min-height:60px}
+.cal .wsum{grid-column:1/-1;display:flex;justify-content:flex-end;gap:10px;font-size:11.5px;padding:2px 6px 6px;border-bottom:1px solid var(--line);margin-bottom:3px}
+.cal .wsum:last-child{border-bottom:0;margin-bottom:0}
+.calkey{display:flex;justify-content:space-between;font-size:11.5px;color:var(--sub);padding:8px 6px 0}
+.calkey i{display:inline-block;width:20px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px;background:linear-gradient(90deg,color-mix(in srgb,var(--out) 10%,transparent),color-mix(in srgb,var(--out) 65%,transparent))}
 /* weeks */
 .week{display:flex;align-items:center;gap:12px;padding:14px;width:100%;text-align:left}
 .week+.week{border-top:1px solid var(--line)}
@@ -319,7 +329,7 @@ function budgetOf(ym){ const m=S.budget.months[ym]; return (m!=null && m!=='') ?
 function sortTx(list){ return list.slice().sort((a,b)=> a.date===b.date ? (b.created||'').localeCompare(a.created||'') : b.date.localeCompare(a.date)); }
 
 /* ================= 화면 상태 ================= */
-const UI = { tab:'home', ym:curYM(), mode:'list', selDay:null };
+const UI = { tab:'home', ym:curYM(), mode:'cal', selDay:null };
 
 function setTab(tab){
   UI.tab = tab;
@@ -400,21 +410,40 @@ function dayList(list, emptyMsg){
       <div class="txs">${items.map(txRow).join('')}</div></div>`;
   }).join('');
 }
+const compact = n => { n=Math.round(n); if (n>=100000000) return (Math.round(n/10000000)/10)+'억';
+  if (n>=10000) { const m=n/10000; return (m>=100?Math.round(m):Math.round(m*10)/10)+'만'; } return n.toLocaleString('ko-KR'); };
 function calView(list){
   const ym = UI.ym, first = dObj(ym+'-01').getDay(), n = daysIn(ym), td = today();
+  if (!UI.selDay && ym===curYM()) UI.selDay = td;
   const per = {};
-  for (const t of list){ const p = per[t.date] ||= {in:0,out:0}; if (t.type!=='tr') p[t.type]+=Number(t.amount)||0; }
-  let h = `<div class="card" style="padding:10px 8px"><div class="cal">${WD.map(w=>`<div class="wd">${w}</div>`).join('')}`;
-  for (let i=0;i<first;i++) h += `<button class="blank"></button>`;
-  for (let d=1; d<=n; d++){
-    const ds = `${ym}-${pad(d)}`, p = per[ds];
-    h += `<button data-act="selDay" data-v="${ds}" class="${ds===td?'today':''} ${ds===UI.selDay?'sel':''}"><span class="d">${d}</span>
-      ${p&&p.in?`<span class="num in">${won(p.in)}</span>`:''}${p&&p.out?`<span class="num out">${won(p.out)}</span>`:''}</button>`;
+  for (const t of list){ const p = per[t.date] ||= {in:0,out:0,tr:0}; p[t.type]+=Number(t.amount)||0; }
+  const maxOut = Math.max(1, ...Object.values(per).map(p=>p.out));
+  const cells = [];
+  for (let i=0;i<first;i++) cells.push(null);
+  for (let d=1; d<=n; d++) cells.push(d);
+  while (cells.length%7) cells.push(null);
+  let h = `<div class="card calcard"><div class="cal">${WD.map(w=>`<div class="wd">${w}</div>`).join('')}`;
+  for (let r=0; r<cells.length; r+=7){
+    let wOut=0, wIn=0;
+    for (let c=0;c<7;c++){
+      const d = cells[r+c];
+      if (d==null){ h += `<span class="blank"></span>`; continue; }
+      const ds = `${ym}-${pad(d)}`, p = per[ds], dow = c;
+      if (p){ wOut+=p.out; wIn+=p.in; }
+      const heat = p && p.out ? (0.1 + 0.55*p.out/maxOut).toFixed(2) : 0;
+      h += `<button data-act="selDay" data-v="${ds}" class="${ds===td?'today':''} ${ds===UI.selDay?'sel':''} ${ds>td?'future':''}" style="--heat:${heat}">
+        <span class="d ${dow===0?'sun':dow===6?'sat':''}">${d}</span>
+        ${p&&p.in?`<span class="num in">+${compact(p.in)}</span>`:''}${p&&p.out?`<span class="num out">−${compact(p.out)}</span>`:''}
+        ${p&&p.tr&&!p.in&&!p.out?`<span class="trdot" title="이체">•</span>`:''}</button>`;
+    }
+    const firstDay = cells.slice(r,r+7).find(x=>x!=null), weekFuture = `${ym}-${pad(firstDay)}` > td;
+    h += `<div class="wsum num">${wIn?`<span class="in">+${won(wIn)}</span>`:''}${wOut?`<span class="out">−${won(wOut)}</span>`:(weekFuture?'':'<span class="faint">지출 없음</span>')}</div>`;
   }
-  h += `</div></div>`;
+  h += `</div><div class="calkey"><span><i></i>지출이 많은 날일수록 진하게</span><span>1.3만 = 13,000원</span></div></div>`;
   if (UI.selDay && ymOf(UI.selDay)===ym){
-    h += dayList(list.filter(t=>t.date===UI.selDay), '이 날은 내역이 없어요');
-  } else h += `<p class="hint" style="text-align:center">날짜를 누르면 그날 내역이 보여요</p>`;
+    const dd = dObj(UI.selDay);
+    h += dayList(list.filter(t=>t.date===UI.selDay), `${dd.getMonth()+1}월 ${dd.getDate()}일은 내역이 없어요`);
+  }
   return h;
 }
 function weekView(list){
@@ -832,7 +861,7 @@ document.addEventListener('click', async e=>{
     case 'close': closeSheet(); break;
     case 'prevM': UI.ym = addMonth(UI.ym,-1); UI.selDay=null; UI.selWeek=null; render(); break;
     case 'nextM': UI.ym = addMonth(UI.ym, 1); UI.selDay=null; UI.selWeek=null; render(); break;
-    case 'mode': UI.mode = v; render(); break;
+    case 'mode': UI.mode = v; try{localStorage.setItem('gagyebu_mode',v)}catch(_){} render(); break;
     case 'selDay': UI.selDay = UI.selDay===v ? null : v; render(); break;
     case 'weekOpen': { const w=v.split('-').map(Number); UI.selWeek = (UI.selWeek && UI.selWeek[0]===w[0]) ? null : w; render(); break; }
     case 'new': if (!S.accounts.length){ toast('먼저 계좌를 추가해 주세요'); setTab('assets'); break; } txForm(null, UI.mode==='cal'&&UI.selDay?{date:UI.selDay}:null); break;
@@ -907,7 +936,8 @@ window.addEventListener('online', ()=>{ if (S.settings.dirty) backupNow(); });
 document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='visible'){ if (S.settings.dirty) backupNow(); render(); } });
 
 /* ================= 시작 ================= */
-load(); render();
+load(); try{ UI.mode = localStorage.getItem('gagyebu_mode') || 'cal'; }catch(_){}
+render();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 if ('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
 if (S.settings.dirty) setTimeout(()=>backupNow(), 1500);
