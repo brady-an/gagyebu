@@ -496,7 +496,7 @@ function alertsBlock(){
       <small>${mdLabel(nd.date)} 출금${nd.moved?` (원래 ${Number(nd.base.slice(8))}일)`:''}${st?` · ${rangeLabel(st.start, st.end)} 사용분`:''}</small></div><button class="btn sm ghost" data-act="payCard" data-id="${a.id}">결제 기록</button></div>`);
   }
   for (const f of S.fixed.filter(f=>f.active!==false && f.day && f.day<=dNow && !fixedDone(f, ym))){
-    items.push(`<div class="alert"><span class="ico">🔁</span><div class="mid"><b>${esc(f.name)} 기록 안 됨</b><small>매달 ${f.day}일 · ${won(f.amount)}원</small></div>
+    items.push(`<div class="alert"><span class="ico">${f.kind==='tr'?'🏦':'🔁'}</span><div class="mid"><b>${esc(f.name)} 기록 안 됨</b><small>매달 ${f.day}일 · ${won(f.amount)}원</small></div>
       <button class="btn sm ghost" data-act="recordFixed" data-id="${f.id}">기록</button></div>`);
   }
   return items.length ? `<div class="alerts">${items.join('')}</div>` : '';
@@ -727,10 +727,11 @@ function viewAssets(){
 /* ================= 더보기 탭 ================= */
 function viewMore(){
   const s = S.settings, fixedOn = S.fixed.filter(f=>f.active!==false);
-  const fixedSum = fixedOn.reduce((a,f)=>a+Number(f.amount||0),0);
+  const fixedSum = fixedOn.filter(f=>f.kind!=='tr').reduce((a,f)=>a+Number(f.amount||0),0);
+  const saveSum = fixedOn.filter(f=>f.kind==='tr').reduce((a,f)=>a+Number(f.amount||0),0);
   const dToday = new Date().getDate();
-  let h = `<div class="card"><div class="grouphead"><h3>🔁 고정지출</h3><span class="num muted" style="font-size:13px">월 ${won(fixedSum)}원</span></div>`;
-  if (!S.fixed.length) h += `<p class="hint">통신비, 구독료처럼 매달 나가는 돈을 적어두세요.</p>`;
+  let h = `<div class="card"><div class="grouphead"><h3>🔁 고정지출·이체</h3><span class="num muted" style="font-size:13px;text-align:right">월 지출 ${won(fixedSum)}원${saveSum?`<br>저축·이체 ${won(saveSum)}원`:''}</span></div>`;
+  if (!S.fixed.length) h += `<p class="hint">통신비, 구독료처럼 매달 나가는 돈이나 청약·적금처럼 매달 옮기는 돈을 적어두세요.</p>`;
   const doneN = fixedOn.filter(f=>fixedDone(f, curYM())).length;
   if (fixedOn.length) h += `<p class="hint" style="margin:-2px 0 4px">이번 달 ${doneN}/${fixedOn.length}개 기록함</p>`;
   for (const f of S.fixed.slice().sort((a,b)=>(a.day||99)-(b.day||99))){
@@ -738,11 +739,11 @@ function viewMore(){
     const soon = !done && f.active!==false && f.day && f.day>=dToday && f.day-dToday<=3;
     const late = !done && f.active!==false && f.day && f.day<dToday;
     h += `<div class="cell"><button style="flex:1;text-align:left" data-act="editFixed" data-id="${f.id}"><b style="font-weight:600${f.active===false?';opacity:.45':''}">${esc(f.name)}</b><br>
-      <small>${f.day?`매달 ${f.day}일`:'날짜 없음'}${f.acc?` · ${esc(accName(f.acc))}`:''}${soon?' · <span style="color:var(--warn)">곧 결제</span>':''}${late?' · <span style="color:var(--danger)">기록 안 됨</span>':''}${f.active===false?' · 중지':''}</small></button>
+      <small>${f.kind==='tr'?'이체 · ':''}${f.day?`매달 ${f.day}일`:'날짜 없음'}${f.kind==='tr'?` · ${esc(f.acc?accName(f.acc):'?')} → ${esc(f.to?accName(f.to):'?')}`:(f.acc?` · ${esc(accName(f.acc))}`:'')}${soon?' · <span style="color:var(--warn)">곧 결제</span>':''}${late?' · <span style="color:var(--danger)">기록 안 됨</span>':''}${f.active===false?' · 중지':''}</small></button>
       <span class="num" style="font-weight:650">${won(f.amount)}</span>
       ${done?`<span class="done">✓ 기록함</span>`:(f.active===false?'':`<button class="btn sm ghost" data-act="recordFixed" data-id="${f.id}">기록</button>`)}</div>`;
   }
-  h += `<button class="addlink" data-act="newFixed">+ 고정지출 추가</button></div>`;
+  h += `<button class="addlink" data-act="newFixed">+ 고정지출·이체 추가</button></div>`;
 
   h += `<div class="card"><button class="cell" data-act="adjust" style="padding:2px 0"><span><b style="font-weight:650">⚖️ 오늘 기준으로 잔액 맞추기</b><br><small>은행·카드 앱의 지금 금액을 입력하면 그대로 맞춰져요</small></span><span class="chev">›</span></button></div>`;
   h += `<div class="card"><div class="grouphead"><h3>⭐ 자주 쓰는 내역</h3><span class="muted" style="font-size:13px">${S.favs.length}개</span></div>`;
@@ -1039,13 +1040,31 @@ function delAcc(){
 
 /* ---- 고정지출 ---- */
 function fixedForm(f){
-  F = f ? JSON.parse(JSON.stringify(f)) : {id:null, name:'', amount:0, day:'', cat:'통신·구독', acc:'', active:true, memo:''};
-  let h = head(F.id?'고정지출 수정':'고정지출 추가');
-  h += `<div class="label">항목</div><input class="field" id="xname" placeholder="예: 휴대폰 요금" value="${esc(F.name)}">`;
+  F = f ? JSON.parse(JSON.stringify(f)) : {id:null, kind:'out', name:'', amount:0, day:'', cat:'통신·구독', acc:'', to:'', active:true, memo:''};
+  if (!F.kind) F.kind = 'out';
+  drawFixedForm();
+}
+function accOptions(sel, filter){ return `<option value="">선택 안 함</option>${S.accounts.filter(a=>!a.hidden&&filter(a)).map(a=>`<option value="${a.id}" ${sel===a.id?'selected':''}>${ACC_TYPES[a.type].icon} ${esc(a.name)}</option>`).join('')}`; }
+function readFixedInputs(){
+  F.name=$('#xname').value.trim(); F.amount=parseAmt($('#xamt').value); F.day=Math.min(31,parseAmt($('#xday').value))||'';
+  const c=$('#xcat'); if (c) F.cat=c.value; F.acc=$('#xacc').value; const t=$('#xto'); if (t) F.to=t.value;
+  F.memo=$('#xmemo').value.trim(); F.active=$('#xactive').checked;
+}
+function drawFixedForm(){
+  const tr = F.kind==='tr';
+  let h = head(F.id?'고정 항목 수정':'고정 항목 추가');
+  h += `<div class="seg">${[['out','지출'],['tr','이체 (저축·청약·투자)']].map(([k,l])=>`<button data-act="fixedKind" data-v="${k}" class="${F.kind===k?'on':''}">${l}</button>`).join('')}</div>`;
+  h += `<div class="label">항목</div><input class="field" id="xname" placeholder="${tr?'예: 주택청약':'예: 휴대폰 요금'}" value="${esc(F.name)}">`;
   h += `<div class="fieldrow"><div><div class="label">금액</div><input class="field" id="xamt" inputmode="numeric" value="${F.amount?won(F.amount):''}"></div>
-        <div><div class="label">매달 결제일</div><input class="field" id="xday" inputmode="numeric" placeholder="예: 25" value="${F.day||''}"></div></div>`;
-  h += `<div class="label">카테고리</div><select class="field" id="xcat">${S.cats.out.map(([n])=>`<option ${F.cat===n?'selected':''}>${esc(n)}</option>`).join('')}</select>`;
-  h += `<div class="label">결제수단</div><select class="field" id="xacc"><option value="">선택 안 함</option>${S.accounts.filter(a=>!a.hidden&&!['invest','saving'].includes(a.type)).map(a=>`<option value="${a.id}" ${F.acc===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select>`;
+        <div><div class="label">${tr?'매달 이체일':'매달 결제일'}</div><input class="field" id="xday" inputmode="numeric" placeholder="예: 25" value="${F.day||''}"></div></div>`;
+  if (tr){
+    h += `<div class="label">보내는 곳</div><select class="field" id="xacc">${accOptions(F.acc, a=>!['check','credit'].includes(a.type))}</select>`;
+    h += `<div class="label">받는 곳</div><select class="field" id="xto">${accOptions(F.to, a=>a.type!=='check')}</select>
+      <p class="hint">지출이나 예산에는 잡히지 않고, 받는 곳 잔액만 늘어나요.</p>`;
+  } else {
+    h += `<div class="label">카테고리</div><select class="field" id="xcat">${S.cats.out.map(([n])=>`<option ${F.cat===n?'selected':''}>${esc(n)}</option>`).join('')}</select>`;
+    h += `<div class="label">결제수단</div><select class="field" id="xacc">${accOptions(F.acc, a=>!['invest','saving'].includes(a.type))}</select>`;
+  }
   h += `<div class="label">메모 (선택)</div><input class="field" id="xmemo" value="${esc(F.memo)}">`;
   h += `<div class="cell" style="margin-top:10px"><span>사용 중</span><label class="toggle"><input type="checkbox" id="xactive" ${F.active!==false?'checked':''}><span></span></label></div>`;
   h += `<div class="btns"><button class="btn" data-act="saveFixed">저장</button>${F.id?`<button class="btn danger" data-act="delFixed">삭제</button>`:''}</div>`;
@@ -1053,9 +1072,12 @@ function fixedForm(f){
   $('#xamt').addEventListener('input',e=>{const n=parseAmt(e.target.value); e.target.value=n?won(n):'';});
 }
 function saveFixed(){
-  const rec = {id:F.id||uid(), name:$('#xname').value.trim(), amount:parseAmt($('#xamt').value), day:Math.min(31,parseAmt($('#xday').value))||'',
-    cat:$('#xcat').value, acc:$('#xacc').value, memo:$('#xmemo').value.trim(), active:$('#xactive').checked};
+  readFixedInputs();
+  const tr = F.kind==='tr';
+  const rec = {id:F.id||uid(), kind:F.kind, name:F.name, amount:F.amount, day:F.day, cat: tr?'':F.cat, acc:F.acc, to: tr?F.to:'', memo:F.memo, active:F.active};
   if (!rec.name) return toast('항목 이름을 입력해 주세요');
+  if (tr && (!rec.acc || !rec.to)) return toast('보내는 곳과 받는 곳을 골라 주세요');
+  if (tr && rec.acc===rec.to) return toast('같은 계좌끼리는 이체할 수 없어요');
   const i = S.fixed.findIndex(f=>f.id===rec.id); if (i>=0) S.fixed[i]=rec; else S.fixed.push(rec);
   persist(); closeSheet(); render(); toast('저장했어요');
 }
@@ -1184,10 +1206,12 @@ document.addEventListener('click', async e=>{
     case 'newFixed': fixedForm(null); break;
     case 'editFixed': fixedForm(S.fixed.find(f=>f.id===id)); break;
     case 'saveFixed': saveFixed(); break;
-    case 'delFixed': if (confirm('이 고정지출을 삭제할까요?')){ S.fixed=S.fixed.filter(f=>f.id!==F.id); persist(); closeSheet(); render(); } break;
+    case 'delFixed': if (confirm('이 고정 항목을 삭제할까요?')){ S.fixed=S.fixed.filter(f=>f.id!==F.id); persist(); closeSheet(); render(); } break;
     case 'recordFixed': { const f=S.fixed.find(x=>x.id===id); const ym=curYM();
       const day = f.day? `${ym}-${pad(Math.min(f.day, daysIn(ym)))}` : today();
-      txForm(null,{type:'out', amount:f.amount, cat:f.cat, from:f.acc||'', memo:f.name, date:day, fixedId:f.id}); break; }
+      if (f.kind==='tr') txForm(null,{type:'tr', amount:f.amount, cat:'', from:f.acc||'', to:f.to||'', memo:f.name, date:day, fixedId:f.id});
+      else txForm(null,{type:'out', amount:f.amount, cat:f.cat, from:f.acc||'', memo:f.name, date:day, fixedId:f.id}); break; }
+    case 'fixedKind': readFixedInputs(); F.kind = v; if (v==='tr' && !F.to){ const sv = S.accounts.find(a=>a.type==='saving'&&!a.hidden); if (sv) F.to = sv.id; } drawFixedForm(); break;
     case 'editBudget': budgetForm(false); break;
     case 'editDefaultBudget': budgetForm(true); break;
     case 'saveBudget': { const n=parseAmt($('#bamt').value);
