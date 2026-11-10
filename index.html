@@ -283,6 +283,7 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;background:var(--
 const KEY = 'gagyebu_v1';
 const ACC_TYPES = {
   bank:   {label:'입출금',   icon:'🏦'},
+  cash:   {label:'현금',     icon:'💵'},
   pay:    {label:'페이',     icon:'📱'},
   saving: {label:'청약·저축', icon:'🏠'},
   invest: {label:'투자',     icon:'📈'},
@@ -692,7 +693,7 @@ function viewAssets(){
   const visible = S.accounts.filter(a=>!a.hidden);
   const net = visible.filter(a=>a.type!=='check').reduce((s,a)=>s+assetValue(a,bal),0);
   let h = `<div class="card networth"><span>순자산</span><b class="num">${won(net)}원</b><small class="muted">투자는 평가액(없으면 원금), 신용카드 미결제액 차감</small></div>`;
-  const order = ['bank','pay','saving','invest','credit','check'];
+  const order = ['bank','cash','pay','saving','invest','credit','check'];
   for (const type of order){
     const list = visible.filter(a=>a.type===type);
     if (!list.length) continue;
@@ -811,7 +812,7 @@ function drawTxForm(){
   if (T!=='tr'){
     h += `<div class="label">카테고리</div><div class="catgrid">${S.cats[T].map(([n,i])=>`<button class="chip ${F.cat===n?'on':''}" data-act="fset" data-f="cat" data-v="${esc(n)}"><em>${i}</em>${esc(n)}</button>`).join('')}</div>`;
   }
-  if (T==='out'){ h += `<div class="label">결제수단</div>` + accChips('from', a=>a.type!=='invest' && a.type!=='saving', ['check','credit','pay','bank']); }
+  if (T==='out'){ h += `<div class="label">결제수단</div>` + accChips('from', a=>a.type!=='invest' && a.type!=='saving', ['check','credit','cash','pay','bank']); }
   if (T==='in'){ h += `<div class="label">받은 계좌</div>` + accChips('to', a=>!['check','credit'].includes(a.type)); }
   if (T==='tr'){
     h += `<div class="label">보내는 곳</div>` + accChips('from', a=>a.type!=='check');
@@ -863,7 +864,7 @@ function adjustForm(){
   const list = S.accounts.filter(a=>!a.hidden && a.type!=='check');
   let h = head('잔액 맞추기');
   h += `<p class="hint" style="margin:-4px 0 12px">은행·카드·증권 앱에 지금 보이는 금액을 적어주세요. 이미 맞는 칸은 그대로 두면 돼요. 지나간 내역을 하나하나 입력하지 않아도 오늘부터 정확하게 시작할 수 있어요.</p>`;
-  const groups = [['bank','pay','saving'],['credit'],['invest']];
+  const groups = [['bank','cash','pay','saving'],['credit'],['invest']];
   for (const g of groups){
     const items = list.filter(a=>g.includes(a.type)); if (!items.length) continue;
     h += `<div class="card">`;
