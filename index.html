@@ -62,6 +62,9 @@ input,select,textarea{font:inherit;color:var(--text)}
 .monthnav b{font-size:20px;font-weight:750;letter-spacing:-.02em;min-width:118px;text-align:center}
 .iconbtn{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;color:var(--sub)}
 .iconbtn:active{background:var(--card2)}
+.bell{position:relative}
+.bell i{position:absolute;top:3px;right:2px;min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:var(--danger);color:#fff;font-size:10.5px;font-weight:750;font-style:normal;display:grid;place-items:center;line-height:1}
+.sheet .alerts{padding:2px 14px}
 .backup-dot{font-size:12px;color:var(--sub);display:flex;align-items:center;gap:5px;padding:6px 10px;border-radius:999px;background:var(--card)}
 .backup-dot i{width:7px;height:7px;border-radius:50%;background:var(--faint);display:inline-block}
 .backup-dot.ok i{background:var(--accent)} .backup-dot.pending i{background:var(--warn)} .backup-dot.err i{background:var(--danger)}
@@ -459,7 +462,7 @@ function monthNav(){
 
 function render(){
   const top = $('#top'), v = $('#view');
-  if (UI.tab==='home'){ top.innerHTML = monthNav() + `<span style="display:flex;align-items:center;gap:4px"><button class="iconbtn" data-act="search" aria-label="검색"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>${backupBadge()}</span>`; v.innerHTML = viewHome(); }
+  if (UI.tab==='home'){ const nAl = alertItems().length; top.innerHTML = monthNav() + `<span style="display:flex;align-items:center;gap:2px"><button class="iconbtn bell" data-act="alerts" aria-label="할 일 ${nAl}개"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></svg>${nAl?`<i>${nAl}</i>`:''}</button><button class="iconbtn" data-act="search" aria-label="검색"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>${backupBadge()}</span>`; v.innerHTML = viewHome(); }
   else if (UI.tab==='stats'){ top.innerHTML = monthNav() + backupBadge(); v.innerHTML = viewStats(); }
   else if (UI.tab==='assets'){ top.innerHTML = `<h1>자산</h1>` + backupBadge(); v.innerHTML = viewAssets(); }
   else { top.innerHTML = `<h1>더보기</h1>` + backupBadge(); v.innerHTML = viewMore(); }
@@ -474,7 +477,6 @@ function viewHome(){
     <div><span>수입</span><b class="num in">${won(inc)}</b></div>
     <div><span>지출</span><b class="num out">${won(out)}</b></div>
     <div><span>합계</span><b class="num">${wonS(inc-out)}</b></div></div>${budgetBlock(UI.ym,out)}</div>`;
-  if (UI.ym===curYM()) h += alertsBlock();
   h += `<div class="seg">${[['list','목록'],['cal','달력'],['week','주별']].map(([k,l])=>`<button data-act="mode" data-v="${k}" class="${UI.mode===k?'on':''}">${l}</button>`).join('')}</div>`;
   if (UI.mode==='cal') h += calView(list);
   else if (UI.mode==='week') h += weekView(list);
@@ -506,7 +508,7 @@ function fixedSums(){
 function fday(f){ if (!f.day) return 0; const n = daysIn(curYM()); return f.day==='last' ? n : Math.min(Number(f.day), n); }
 const dayLabel = f => !f.day ? '날짜 없음' : f.day==='last' ? '매달 말일' : `매달 ${f.day}일`;
 function fixedDone(f, ym){ return S.txs.some(t=>t.fixedId===f.id && ymOf(t.date)===ym); }
-function alertsBlock(){
+function alertItems(){
   const td = today(), dNow = new Date().getDate(), ym = curYM(), bal = balances(), items = [];
   for (const a of S.accounts.filter(a=>a.type==='credit' && !a.hidden)){
     const nd = nextDue(a); if (!nd) continue;
@@ -517,14 +519,19 @@ function alertsBlock(){
       <small>${mdLabel(nd.date)} 출금${st?` · ${st.start.slice(8)==='01'&&st.end===`${ymOf(st.end)}-${pad(daysIn(ymOf(st.end)))}`?`${Number(st.start.slice(5,7))}월`:rangeLabel(st.start, st.end)} 사용분`:''}</small></div><button class="btn sm ghost" data-act="payCard" data-id="${a.id}">기록</button></div>`);
   }
   const missed = S.fixed.filter(f=>f.active!==false && f.day && fday(f)<=dNow && !fixedDone(f, ym)).sort((a,b)=>fday(a)-fday(b));
-  if (missed.length===1){ const f = missed[0];
+  for (const f of missed){
     items.push(`<div class="alert"><span class="ico">${f.kind==='tr'?'🏦':'🔁'}</span><div class="mid"><b>${esc(f.name)} 기록 안 됨</b><small>${dayLabel(f)} · ${f.variable?(fixedEst(f).amt?`지난번 ${won(fixedEst(f).amt)}원`:'금액 입력 필요'):won(f.amount)+'원'}</small></div>
       <button class="btn sm ghost" data-act="recordFixed" data-id="${f.id}">기록</button></div>`);
-  } else if (missed.length>1){
-    items.push(`<div class="alert"><span class="ico">🔁</span><div class="mid"><b>고정 항목 ${missed.length}개 기록 안 됨</b><small>${esc(missed.map(f=>f.name).join(', '))}</small></div>
-      <button class="btn sm ghost" data-act="fixedPage">보기</button></div>`);
   }
-  return items.length ? `<div class="alerts">${items.join('')}</div>` : '';
+  return items;
+}
+function alertsSheet(){
+  UI.backToAlerts = true;
+  const items = alertItems();
+  let h = `<div class="sheethead"><button data-act="close">닫기</button><h2>할 일</h2><span style="width:40px"></span></div>`;
+  h += items.length ? `<div class="alerts">${items.join('')}</div><p class="hint" style="text-align:center">카드 결제는 7일 전부터, 고정 항목은 날짜가 지나면 여기에 떠요</p>`
+                    : `<div class="empty"><b>✅</b>지금 할 일이 없어요</div>`;
+  openSheet(h);
 }
 function budgetBlock(ym, out){
   const b = budgetOf(ym);
@@ -790,7 +797,7 @@ function viewMore(){
 
 /* ================= 시트(모달) ================= */
 function openSheet(html){ $('#sheet').innerHTML = `<div class="grab"></div>` + html; $('#sheet').classList.add('on'); $('#scrim').classList.add('on'); $('#sheet').scrollTop=0; document.body.style.overflow='hidden'; }
-function closeSheet(){ UI.backToFixed = false; $('#sheet').classList.remove('on'); $('#scrim').classList.remove('on'); document.body.style.overflow=''; }
+function closeSheet(){ UI.backToFixed = false; UI.backToAlerts = false; $('#sheet').classList.remove('on'); $('#scrim').classList.remove('on'); document.body.style.overflow=''; }
 const head = (title, right='') => `<div class="sheethead"><button data-act="close">취소</button><h2>${title}</h2><span style="width:40px;text-align:right">${right}</span></div>`;
 const parseAmt = v => Number(String(v).replace(/[^0-9]/g,''))||0;
 
@@ -851,7 +858,7 @@ function favSub(f){
 function sameFav(a,b){ return a.type===b.type && a.cat===b.cat && a.from===b.from && a.to===b.to && a.memo===b.memo && Number(a.amount)===Number(b.amount); }
 function readTxInputs(){ F.amount = parseAmt($('#amt').value); F.date = $('#fdate').value || today(); F.memo = $('#fmemo').value.trim(); const d=$('#fdisc'); F.discount = d ? parseAmt(d.value) : 0; }
 function saveTx(){
-  const back = UI.backToFixed;
+  const back = UI.backToFixed, backAl = UI.backToAlerts;
   readTxInputs();
   if (!F.amount) return toast('금액을 입력해 주세요');
   if (F.type!=='out') F.discount = 0;
@@ -872,6 +879,7 @@ function saveTx(){
   persist(); closeSheet();
   UI.ym = ymOf(rec.date); render(); toast(i>=0?'수정했어요':'저장했어요');
   if (back && rec.fixedId) fixedPage();
+  else if (backAl && (rec.fixedId || (rec.type==='tr' && acc(rec.to)?.type==='credit')) && alertItems().length) alertsSheet();
 }
 
 /* ---- 오늘 기준 잔액 맞추기 ---- */
@@ -1296,6 +1304,7 @@ document.addEventListener('click', async e=>{
     case 'backupNow': S.settings.dirty=true; backupNow(true); break;
     case 'restore': restore(); break;
     case 'search': searchForm(); break;
+    case 'alerts': alertsSheet(); break;
     case 'adjust': adjustForm(); break;
     case 'saveAdjust': saveAdjust(); break;
     case 'favToggle': readTxInputs(); F.fav = !F.fav; drawTxForm(); if (F.fav) toast('저장할 때 즐겨찾기에도 추가돼요'); break;
@@ -1313,7 +1322,7 @@ document.addEventListener('click', async e=>{
     case 'payCard': { const a = acc(id); if (!a) break; const amt = payAmount(a);
       const nd = nextDue(a), td = today();
       const date = nd && nd.date<=td ? nd.date : td;
-      closeSheet(); setTimeout(()=>txForm(null, {type:'tr', from:a.payAcc||'', to:a.id, amount:amt, memo:`${a.name} 카드값`, date}), 60); break; }
+      const bA = UI.backToAlerts; closeSheet(); UI.backToAlerts = bA; setTimeout(()=>txForm(null, {type:'tr', from:a.payAcc||'', to:a.id, amount:amt, memo:`${a.name} 카드값`, date}), 60); break; }
     case 'theme': try{ localStorage.setItem('gagyebu_theme', v); }catch(_){} applyTheme(v); render(); break;
     case 'exportJson': {
       const blob = new Blob([JSON.stringify(exportData(),null,1)],{type:'application/json'});
