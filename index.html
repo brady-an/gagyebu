@@ -443,8 +443,8 @@ function sortTx(list){ return list.slice().sort((a,b)=> a.date===b.date ? (b.cre
 /* ================= 화면 상태 ================= */
 const UI = { tab:'home', ym:curYM(), mode:'cal', selDay:null };
 
-function setTab(tab){
-  UI.tab = tab;
+function setTab(tab, sub){
+  UI.tab = tab; UI.sub = sub||null;
   document.querySelectorAll('nav.tabs [data-tab]').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
   render(); window.scrollTo(0,0);
 }
@@ -465,6 +465,7 @@ function render(){
   if (UI.tab==='home'){ const nAl = alertItems().length; top.innerHTML = monthNav() + `<span style="display:flex;align-items:center;gap:2px"><button class="iconbtn bell" data-act="alerts" aria-label="할 일 ${nAl}개"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></svg>${nAl?`<i>${nAl}</i>`:''}</button><button class="iconbtn" data-act="search" aria-label="검색"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>${backupBadge()}</span>`; v.innerHTML = viewHome(); }
   else if (UI.tab==='stats'){ top.innerHTML = monthNav() + backupBadge(); v.innerHTML = viewStats(); }
   else if (UI.tab==='assets'){ top.innerHTML = `<h1>자산</h1>` + backupBadge(); v.innerHTML = viewAssets(); }
+  else if (UI.sub==='settings'){ top.innerHTML = `<div style="display:flex;align-items:center;gap:2px"><button class="iconbtn" data-act="settingsBack" aria-label="뒤로" style="font-size:24px;margin-left:-8px">‹</button><h1>설정</h1></div>` + backupBadge(); v.innerHTML = viewSettings(); }
   else { top.innerHTML = `<h1>더보기</h1>` + backupBadge(); v.innerHTML = viewMore(); }
 }
 
@@ -765,6 +766,16 @@ function viewMore(){
     <span style="text-align:right"><span class="num" style="font-weight:650">${fs.approx?'약 ':''}${won(fs.out)}원</span>${fs.tr?`<br><small class="num">저축 ${won(fs.tr)}원</small>`:''} <span class="chev">›</span></span></button></div>`;
 
   h += `<div class="card"><button class="cell" data-act="adjust" style="padding:2px 0"><span><b style="font-weight:650">⚖️ 오늘 기준으로 잔액 맞추기</b><br><small>은행·카드 앱의 지금 금액을 입력하면 그대로 맞춰져요</small></span><span class="chev">›</span></button></div>`;
+  const bNow = budgetOf(curYM());
+  h += `<div class="card"><button class="cell" data-act="editBudget" style="padding:2px 0"><span><b style="font-weight:650">💰 ${Number(curYM().slice(5))}월 예산</b><br><small>${bNow?`${won(sumBy(monthTx(curYM()),'out'))}원 사용 · ${Math.round(sumBy(monthTx(curYM()),'out')/bNow*100)}%`:'예산을 정하면 남은 금액을 알려줘요'}</small></span>
+    <span><span class="num" style="font-weight:650">${bNow?won(bNow)+'원':'미설정'}</span> <span class="chev">›</span></span></button></div>`;
+  h += `<div class="card"><button class="cell" data-act="settings" style="padding:2px 0"><span><b style="font-weight:650">⚙️ 설정</b><br><small>화면 모드, 카테고리, 자주 쓰는 내역, 백업</small></span><span class="chev">›</span></button></div>`;
+  h += `<p class="hint" style="text-align:center">내역 ${S.txs.length}건 · 계좌 ${S.accounts.length}개 · 이 데이터는 이 기기에 저장돼요</p>`;
+  return h;
+}
+function viewSettings(){
+  const s = S.settings;
+  let h = '';
   h += `<div class="card"><div class="grouphead"><h3>⭐ 자주 쓰는 내역</h3><span class="muted" style="font-size:13px">${S.favs.length}개</span></div>`;
   if (!S.favs.length) h += `<p class="hint">내역을 입력할 때 오른쪽 위 ☆를 누르면 여기에 저장돼요. 다음부터는 + 화면 위쪽에서 한 번 눌러 바로 기록할 수 있어요.</p>`;
   S.favs.forEach((f,k)=>{ h += `<div class="cell"><span><b style="font-weight:600">${esc(favTitle(f))}</b><br><small>${favSub(f)}</small></span>
@@ -774,7 +785,6 @@ function viewMore(){
   h += `<div class="card"><h3>🎨 화면 모드</h3><div class="seg" style="margin:0">${[['auto','자동'],['light','라이트'],['dark','다크']].map(([k,l])=>`<button data-act="theme" data-v="${k}" class="${th===k?'on':''}">${l}</button>`).join('')}</div>
     <p class="hint">자동은 아이폰 설정(라이트/다크)을 따라가요.</p></div>`;
   h += `<div class="card"><h3>💰 예산</h3>
-    <button class="cell" data-act="editBudget"><span>${ymLabel(curYM())} 예산</span><span><span class="num">${budgetOf(curYM())?won(budgetOf(curYM()))+'원':'미설정'}</span> <span class="chev">›</span></span></button>
     <button class="cell" data-act="editDefaultBudget"><span>기본 월 예산<br><small>달마다 따로 정하지 않으면 이 금액</small></span><span><span class="num">${S.budget.default?won(S.budget.default)+'원':'미설정'}</span> <span class="chev">›</span></span></button></div>`;
 
   h += `<div class="card"><h3>🏷️ 카테고리</h3>
@@ -790,8 +800,7 @@ function viewMore(){
 
   h += `<div class="card"><h3>📁 파일로 보관</h3>
     <button class="cell" data-act="exportJson"><span>JSON으로 내보내기<br><small>파일 앱이나 iCloud에 보관</small></span><span class="chev">›</span></button>
-    <button class="cell" data-act="importJson"><span>JSON 파일 불러오기</span><span class="chev">›</span></button></div>
-    <p class="hint" style="text-align:center">내역 ${S.txs.length}건 · 계좌 ${S.accounts.length}개 · 이 데이터는 이 기기 브라우저에 저장돼요</p>`;
+    <button class="cell" data-act="importJson"><span>JSON 파일 불러오기</span><span class="chev">›</span></button></div>`;
   return h;
 }
 
@@ -1266,6 +1275,8 @@ document.addEventListener('click', async e=>{
     case 'saveFixed': saveFixed(); break;
     case 'delFixed': if (confirm('이 고정 항목을 삭제할까요?')){ S.fixed=S.fixed.filter(f=>f.id!==F.id); persist(); render(); if (UI.backToFixed) fixedPage(); else closeSheet(); } break;
     case 'fixedPage': fixedPage(); break;
+    case 'settings': setTab('more','settings'); break;
+    case 'settingsBack': setTab('more'); break;
     case 'fixedLast': { const y=$('#sheet').scrollTop; readFixedInputs(); F.day = F.day==='last' ? '' : 'last'; drawFixedForm(); $('#sheet').scrollTop=y; break; }
     case 'fixedVar': { const y=$('#sheet').scrollTop; readFixedInputs(); drawFixedForm(); $('#sheet').scrollTop=y; break; }
     case 'recordFixed': { const f=S.fixed.find(x=>x.id===id); const ym=curYM();
@@ -1285,7 +1296,7 @@ document.addEventListener('click', async e=>{
     case 'catAdd': { const n=$('#cname').value.trim(), i=$('#cicon').value.trim()||'•'; if(!n) return toast('이름을 입력해 주세요');
       if (F.list.some(c=>c[0]===n)) return toast('이미 있는 카테고리예요'); F.list.push([n,i]); drawCats(); break; }
     case 'catSave': if(!F.list.length) return toast('카테고리가 하나는 있어야 해요'); S.cats[F.type]=F.list; persist(); closeSheet(); render(); toast('저장했어요'); break;
-    case 'goBackup': setTab('more'); if (!S.settings.url) backupForm(); else setTimeout(()=>$('#backupCard')?.scrollIntoView({behavior:'smooth'}),50); break;
+    case 'goBackup': setTab('more','settings'); if (!S.settings.url) backupForm(); else setTimeout(()=>$('#backupCard')?.scrollIntoView({behavior:'smooth'}),50); break;
     case 'setupBackup': backupForm(); break;
     case 'saveBackupCfg': {
       const url=$('#burl').value.trim(), key=$('#bkey').value.trim();
