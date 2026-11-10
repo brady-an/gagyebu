@@ -502,6 +502,9 @@ function fixedSums(){
   for (const f of on){ const e = fixedEst(f); if (f.kind==='tr'){ if (inSum(f)) tr+=e.amt; } else out+=e.amt; if (!e.exact) approx=true; }
   return {on, out, tr, approx, done: on.filter(f=>fixedDone(f, curYM())).length};
 }
+// 이번 달 기준 실제 날짜(말일·짧은 달 처리)
+function fday(f){ if (!f.day) return 0; const n = daysIn(curYM()); return f.day==='last' ? n : Math.min(Number(f.day), n); }
+const dayLabel = f => !f.day ? '날짜 없음' : f.day==='last' ? '매달 말일' : `매달 ${f.day}일`;
 function fixedDone(f, ym){ return S.txs.some(t=>t.fixedId===f.id && ymOf(t.date)===ym); }
 function alertsBlock(){
   const td = today(), dNow = new Date().getDate(), ym = curYM(), bal = balances(), items = [];
@@ -513,9 +516,9 @@ function alertsBlock(){
     if (days<=7) items.push(`<div class="alert"><span class="ico">💳</span><div class="mid"><b>${esc(a.name)} ${won(pay)}원 · ${dday(nd.date)}</b>
       <small>${mdLabel(nd.date)} 출금${st?` · ${st.start.slice(8)==='01'&&st.end===`${ymOf(st.end)}-${pad(daysIn(ymOf(st.end)))}`?`${Number(st.start.slice(5,7))}월`:rangeLabel(st.start, st.end)} 사용분`:''}</small></div><button class="btn sm ghost" data-act="payCard" data-id="${a.id}">기록</button></div>`);
   }
-  const missed = S.fixed.filter(f=>f.active!==false && f.day && f.day<=dNow && !fixedDone(f, ym)).sort((a,b)=>a.day-b.day);
+  const missed = S.fixed.filter(f=>f.active!==false && f.day && fday(f)<=dNow && !fixedDone(f, ym)).sort((a,b)=>fday(a)-fday(b));
   if (missed.length===1){ const f = missed[0];
-    items.push(`<div class="alert"><span class="ico">${f.kind==='tr'?'🏦':'🔁'}</span><div class="mid"><b>${esc(f.name)} 기록 안 됨</b><small>매달 ${f.day}일 · ${f.variable?(fixedEst(f).amt?`지난번 ${won(fixedEst(f).amt)}원`:'금액 입력 필요'):won(f.amount)+'원'}</small></div>
+    items.push(`<div class="alert"><span class="ico">${f.kind==='tr'?'🏦':'🔁'}</span><div class="mid"><b>${esc(f.name)} 기록 안 됨</b><small>${dayLabel(f)} · ${f.variable?(fixedEst(f).amt?`지난번 ${won(fixedEst(f).amt)}원`:'금액 입력 필요'):won(f.amount)+'원'}</small></div>
       <button class="btn sm ghost" data-act="recordFixed" data-id="${f.id}">기록</button></div>`);
   } else if (missed.length>1){
     items.push(`<div class="alert"><span class="ico">🔁</span><div class="mid"><b>고정 항목 ${missed.length}개 기록 안 됨</b><small>${esc(missed.map(f=>f.name).join(', '))}</small></div>
@@ -749,7 +752,7 @@ function viewAssets(){
 /* ================= 더보기 탭 ================= */
 function viewMore(){
   const s = S.settings, fs = fixedSums();
-  const late = fs.on.filter(f=>f.day && f.day<new Date().getDate() && !fixedDone(f, curYM())).length;
+  const late = fs.on.filter(f=>f.day && fday(f)<new Date().getDate() && !fixedDone(f, curYM())).length;
   let h = `<div class="card"><button class="cell" data-act="fixedPage" style="padding:2px 0"><span><b style="font-weight:650">🔁 고정지출·이체</b><br>
     <small>${fs.on.length ? `이번 달 ${fs.done}/${fs.on.length}개 기록${late?` · <span style="color:var(--danger)">${late}개 놓침</span>`:''}` : '매달 나가는 돈을 등록해 두세요'}</small></span>
     <span style="text-align:right"><span class="num" style="font-weight:650">${fs.approx?'약 ':''}${won(fs.out)}원</span>${fs.tr?`<br><small class="num">저축 ${won(fs.tr)}원</small>`:''} <span class="chev">›</span></span></button></div>`;
@@ -1058,7 +1061,7 @@ function fixedForm(f){
 }
 function accOptions(sel, filter){ return `<option value="">선택 안 함</option>${S.accounts.filter(a=>!a.hidden&&filter(a)).map(a=>`<option value="${a.id}" ${sel===a.id?'selected':''}>${ACC_TYPES[a.type].icon} ${esc(a.name)}</option>`).join('')}`; }
 function readFixedInputs(){
-  F.name=$('#xname').value.trim(); F.amount=parseAmt($('#xamt').value); const vr=$('#xvar'); if (vr) F.variable=vr.checked; F.day=Math.min(31,parseAmt($('#xday').value))||'';
+  F.name=$('#xname').value.trim(); F.amount=parseAmt($('#xamt').value); const vr=$('#xvar'); if (vr) F.variable=vr.checked; const dv=parseAmt($('#xday').value); F.day = dv ? Math.min(31,dv) : (F.day==='last' ? 'last' : '');
   const c=$('#xcat'); if (c) F.cat=c.value; F.acc=$('#xacc').value; const t=$('#xto'); if (t) F.to=t.value;
   F.memo=$('#xmemo').value.trim(); F.active=$('#xactive').checked; const xs=$('#xsum'); if (xs) F.inSum = xs.checked;
 }
@@ -1069,7 +1072,8 @@ function drawFixedForm(){
   h += `<div class="label">항목</div><input class="field" id="xname" placeholder="${tr?'예: 주택청약':'예: 휴대폰 요금'}" value="${esc(F.name)}">`;
   h += `<div class="cell" style="padding:6px 0 0"><span>금액이 매달 달라요<br><small>관리비·가스비처럼. 금액은 기록할 때 입력해요</small></span><label class="toggle"><input type="checkbox" id="xvar" ${F.variable?'checked':''} data-act="fixedVar"><span></span></label></div>`;
   h += `<div class="fieldrow"><div><div class="label">${F.variable?'평소 금액 (선택)':'금액'}</div><input class="field" id="xamt" inputmode="numeric" placeholder="${F.variable?'비워둬도 돼요':''}" value="${F.amount?won(F.amount):''}"></div>
-        <div><div class="label">${tr?'매달 이체일':'매달 결제일'}</div><input class="field" id="xday" inputmode="numeric" placeholder="예: 25" value="${F.day||''}"></div></div>`;
+        <div><div class="label">${tr?'매달 이체일':'매달 결제일'}</div><div style="display:flex;gap:6px"><input class="field" id="xday" inputmode="numeric" placeholder="${F.day==='last'?'말일':'예: 25'}" value="${F.day&&F.day!=='last'?F.day:''}" style="min-width:0">
+          <button class="chip ${F.day==='last'?'on':''}" data-act="fixedLast" style="flex:none">말일</button></div></div></div>`;
   if (tr){
     h += `<div class="label">보내는 곳</div><select class="field" id="xacc">${accOptions(F.acc, a=>!['check','credit'].includes(a.type))}</select>`;
     h += `<div class="label">받는 곳</div><select class="field" id="xto">${accOptions(F.to, a=>a.type!=='check')}</select>
@@ -1084,6 +1088,7 @@ function drawFixedForm(){
   h += `<div class="btns"><button class="btn" data-act="saveFixed">저장</button>${F.id?`<button class="btn danger" data-act="delFixed">삭제</button>`:''}</div>`;
   openSheet(h);
   $('#xamt').addEventListener('input',e=>{const n=parseAmt(e.target.value); e.target.value=n?won(n):'';});
+  $('#xday').addEventListener('input',e=>{ if (e.target.value){ F.day=''; document.querySelector('[data-act=fixedLast]').classList.remove('on'); e.target.placeholder='예: 25'; } });
   const xt=$('#xto'), xs=$('#xsum');
   if (xt && xs){ xs.addEventListener('change',()=>{ F.sumTouched=true; }); xt.addEventListener('change',()=>{ if (!F.sumTouched){ const t=acc(xt.value); xs.checked = !(t && ['bank','pay','cash'].includes(t.type)); } }); }
 }
@@ -1108,17 +1113,17 @@ function fixedPage(){
     <div><span>월 지출</span><b class="num">${fs.approx?'약 ':''}${won(fs.out)}</b></div>${fs.tr?`<div><span>저축·이체</span><b class="num in">${won(fs.tr)}</b></div>`:''}
     <div><span>이번 달 기록</span><b class="num">${fs.done}/${fs.on.length}</b></div></div></div>`;
   if (!S.fixed.length) h += `<div class="empty"><b>🔁</b>통신비·관리비처럼 매달 나가는 돈이나<br>청약·적금처럼 매달 옮기는 돈을 등록해 두세요</div>`;
-  const sorted = S.fixed.slice().sort((a,b)=>(a.active===false)-(b.active===false) || (a.day||99)-(b.day||99));
+  const sorted = S.fixed.slice().sort((a,b)=>(a.active===false)-(b.active===false) || (fday(a)||99)-(fday(b)||99));
   const groups = [['out','지출'],['tr','저축·이체']];
   for (const [k,l] of groups){
     const items = sorted.filter(f=>(f.kind==='tr')===(k==='tr')); if (!items.length) continue;
     h += `<div class="label">${l}</div><div class="card" style="padding:4px 16px">`;
     for (const f of items){
       const on = f.active!==false, done = on && fixedDone(f, curYM()), e = fixedEst(f);
-      const soon = on && !done && f.day && f.day>=dToday && f.day-dToday<=3, late = on && !done && f.day && f.day<dToday;
+      const fd = fday(f), soon = on && !done && fd && fd>=dToday && fd-dToday<=3, late = on && !done && fd && fd<dToday;
       const amtTxt = f.variable && !done ? (e.amt?`<span class="muted" style="font-weight:500">약 </span>${won(e.amt)}`:'<span class="muted" style="font-weight:500;font-size:13px">변동</span>') : won(e.amt);
       h += `<div class="cell"><button style="flex:1;min-width:0;text-align:left" data-act="editFixed" data-id="${f.id}"><b style="font-weight:600${on?'':';opacity:.45'}">${esc(f.name)}</b><br>
-        <small>${f.day?`매달 ${f.day}일`:'날짜 없음'}${f.kind==='tr'?` · ${esc(f.acc?accName(f.acc):'?')} → ${esc(f.to?accName(f.to):'?')}`:(f.acc?` · ${esc(accName(f.acc))}`:'')}${f.variable?' · 금액 변동':''}${f.kind==='tr'&&!inSum(f)?' · 합계 제외':''}${soon?' · <span style="color:var(--warn)">곧 결제</span>':''}${late?' · <span style="color:var(--danger)">기록 안 됨</span>':''}${on?'':' · 중지'}</small></button>
+        <small>${dayLabel(f)}${f.kind==='tr'?` · ${esc(f.acc?accName(f.acc):'?')} → ${esc(f.to?accName(f.to):'?')}`:(f.acc?` · ${esc(accName(f.acc))}`:'')}${f.variable?' · 금액 변동':''}${f.kind==='tr'&&!inSum(f)?' · 합계 제외':''}${soon?' · <span style="color:var(--warn)">곧 결제</span>':''}${late?' · <span style="color:var(--danger)">기록 안 됨</span>':''}${on?'':' · 중지'}</small></button>
         <span class="num" style="font-weight:650;white-space:nowrap">${amtTxt}</span>
         ${done?`<span class="done">✓</span>`:(on?`<button class="btn sm ghost" data-act="recordFixed" data-id="${f.id}">기록</button>`:'')}</div>`;
     }
@@ -1253,9 +1258,10 @@ document.addEventListener('click', async e=>{
     case 'saveFixed': saveFixed(); break;
     case 'delFixed': if (confirm('이 고정 항목을 삭제할까요?')){ S.fixed=S.fixed.filter(f=>f.id!==F.id); persist(); render(); if (UI.backToFixed) fixedPage(); else closeSheet(); } break;
     case 'fixedPage': fixedPage(); break;
+    case 'fixedLast': { const y=$('#sheet').scrollTop; readFixedInputs(); F.day = F.day==='last' ? '' : 'last'; drawFixedForm(); $('#sheet').scrollTop=y; break; }
     case 'fixedVar': { const y=$('#sheet').scrollTop; readFixedInputs(); drawFixedForm(); $('#sheet').scrollTop=y; break; }
     case 'recordFixed': { const f=S.fixed.find(x=>x.id===id); const ym=curYM();
-      const day = f.day? `${ym}-${pad(Math.min(f.day, daysIn(ym)))}` : today();
+      const day = f.day? `${ym}-${pad(fday(f))}` : today();
       const amt0 = f.variable ? 0 : f.amount, hint = f.variable ? fixedEst(f).amt : 0;
       if (f.kind==='tr') txForm(null,{type:'tr', amount:amt0, hint, cat:'', from:f.acc||'', to:f.to||'', memo:f.name, date:day, fixedId:f.id});
       else txForm(null,{type:'out', amount:amt0, hint, cat:f.cat, from:f.acc||'', memo:f.name, date:day, fixedId:f.id}); break; }
