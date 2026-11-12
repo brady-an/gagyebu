@@ -779,7 +779,7 @@ function viewSettings(){
   h += `<div class="card"><div class="grouphead"><h3>⭐ 자주 쓰는 내역</h3><span class="muted" style="font-size:13px">${S.favs.length}개</span></div>`;
   if (!S.favs.length) h += `<p class="hint">내역을 입력할 때 오른쪽 위 ☆를 누르면 여기에 저장돼요. 다음부터는 + 화면 위쪽에서 한 번 눌러 바로 기록할 수 있어요.</p>`;
   S.favs.forEach((f,k)=>{ h += `<div class="cell"><span><b style="font-weight:600">${esc(favTitle(f))}</b><br><small>${favSub(f)}</small></span>
-    <span><button class="iconbtn" data-act="favUp" data-v="${k}" aria-label="위로">↑</button><button class="iconbtn" data-act="favDel" data-v="${k}" aria-label="삭제" style="color:var(--danger)">✕</button></span></div>`; });
+    <span style="display:flex;flex:none"><button class="iconbtn" data-act="favUp" data-v="${k}" aria-label="위로">↑</button><button class="iconbtn" data-act="favDel" data-v="${k}" aria-label="삭제" style="color:var(--danger)">✕</button></span></div>`; });
   h += `</div>`;
   const th = getTheme();
   h += `<div class="card"><h3>🎨 화면 모드</h3><div class="seg" style="margin:0">${[['auto','자동'],['light','라이트'],['dark','다크']].map(([k,l])=>`<button data-act="theme" data-v="${k}" class="${th===k?'on':''}">${l}</button>`).join('')}</div>
@@ -1163,17 +1163,21 @@ function budgetForm(def){
 
 /* ---- 카테고리 ---- */
 function catsForm(type){
-  F = {type, list: JSON.parse(JSON.stringify(S.cats[type]))};
+  F = {type, list: JSON.parse(JSON.stringify(S.cats[type])).map(([n,i])=>[n,i,n]), edit:-1}; // [이름, 아이콘, 원래 이름]
   drawCats();
 }
 function drawCats(){
   let h = head(F.type==='out'?'지출 카테고리':'수입 카테고리');
-  h += `<div class="card">${F.list.map(([n,i],k)=>`<div class="cell"><span><span style="font-size:20px;margin-right:8px">${i}</span>${esc(n)}</span>
-     <span><button class="iconbtn" data-act="catUp" data-v="${k}" aria-label="위로">↑</button><button class="iconbtn" data-act="catDel" data-v="${k}" aria-label="삭제" style="color:var(--danger)">✕</button></span></div>`).join('')}</div>`;
-  h += `<div class="fieldrow"><input class="field" id="cicon" placeholder="🙂" style="flex:0 0 64px;text-align:center" maxlength="4"><input class="field" id="cname" placeholder="새 카테고리 이름"></div>
-    <div class="btns"><button class="btn ghost" data-act="catAdd">추가</button><button class="btn" data-act="catSave">저장</button></div>
-    <p class="hint">삭제해도 이미 기록된 내역의 카테고리 이름은 그대로 남아요.</p>`;
+  const ed = F.edit>=0 ? F.list[F.edit] : null;
+  h += `<div class="card">${F.list.map(([n,i,o],k)=>`<div class="cell" style="${k===F.edit?'background:var(--accent-soft);margin:0 -16px;padding-left:16px;padding-right:16px':''}">
+     <button style="flex:1;text-align:left" data-act="catEdit" data-v="${k}"><span style="font-size:20px;margin-right:8px">${i}</span>${esc(n)}${o&&o!==n?` <small class="muted">(${esc(o)})</small>`:''}</button>
+     <span style="display:flex;flex:none"><button class="iconbtn" data-act="catEdit" data-v="${k}" aria-label="수정">✎</button><button class="iconbtn" data-act="catUp" data-v="${k}" aria-label="위로">↑</button><button class="iconbtn" data-act="catDel" data-v="${k}" aria-label="삭제" style="color:var(--danger)">✕</button></span></div>`).join('')}</div>`;
+  h += `<div class="label">${ed?`'${esc(ed[0])}' 수정`:'새 카테고리'}</div>
+    <div class="fieldrow"><input class="field" id="cicon" placeholder="🙂" style="flex:0 0 64px;text-align:center" maxlength="4" value="${ed?esc(ed[1]):''}"><input class="field" id="cname" placeholder="${ed?'바꿀 이름':'새 카테고리 이름'}" value="${ed?esc(ed[0]):''}"></div>
+    <div class="btns">${ed?`<div class="fieldrow"><button class="btn ghost" data-act="catEditCancel">취소</button><button class="btn ghost" data-act="catApply">수정</button></div>`:`<button class="btn ghost" data-act="catAdd">추가</button>`}<button class="btn" data-act="catSave">저장</button></div>
+    <p class="hint">이름을 바꾸면 이미 기록된 내역·고정지출·즐겨찾기의 카테고리도 함께 바뀌어요. 삭제한 카테고리는 기존 내역에 이름만 남아요.</p>`;
   openSheet(h);
+  if (ed) setTimeout(()=>$('#cname').focus(), 50);
 }
 
 /* ---- 백업 설정 ---- */
@@ -1294,8 +1298,21 @@ document.addEventListener('click', async e=>{
     case 'catUp': { const k=+v; if(k>0){[F.list[k-1],F.list[k]]=[F.list[k],F.list[k-1]];} drawCats(); break; }
     case 'catDel': F.list.splice(+v,1); drawCats(); break;
     case 'catAdd': { const n=$('#cname').value.trim(), i=$('#cicon').value.trim()||'•'; if(!n) return toast('이름을 입력해 주세요');
-      if (F.list.some(c=>c[0]===n)) return toast('이미 있는 카테고리예요'); F.list.push([n,i]); drawCats(); break; }
-    case 'catSave': if(!F.list.length) return toast('카테고리가 하나는 있어야 해요'); S.cats[F.type]=F.list; persist(); closeSheet(); render(); toast('저장했어요'); break;
+      if (F.list.some(c=>c[0]===n)) return toast('이미 있는 카테고리예요'); F.list.push([n,i,'']); drawCats(); break; }
+    case 'catEdit': { const y=$('#sheet').scrollTop; F.edit = F.edit===+v ? -1 : +v; drawCats(); $('#sheet').scrollTop=y; break; }
+    case 'catEditCancel': F.edit = -1; drawCats(); break;
+    case 'catApply': { const n=$('#cname').value.trim(), i=$('#cicon').value.trim()||'•'; if(!n) return toast('이름을 입력해 주세요');
+      if (F.list.some((c,k)=>c[0]===n && k!==F.edit)) return toast('이미 있는 카테고리예요');
+      F.list[F.edit][0]=n; F.list[F.edit][1]=i; F.edit=-1; drawCats(); break; }
+    case 'catSave': { if(!F.list.length) return toast('카테고리가 하나는 있어야 해요');
+      const ren = {}; F.list.forEach(([n,,o])=>{ if (o && o!==n) ren[o]=n; });
+      const types = F.type==='out' ? ['out'] : ['in']; let moved = 0;
+      if (Object.keys(ren).length){
+        for (const t of S.txs) if (types.includes(t.type) && ren[t.cat]){ t.cat = ren[t.cat]; moved++; }
+        for (const f of S.favs) if (types.includes(f.type) && ren[f.cat]) f.cat = ren[f.cat];
+        if (F.type==='out') for (const f of S.fixed) if (f.kind!=='tr' && ren[f.cat]) f.cat = ren[f.cat];
+      }
+      S.cats[F.type]=F.list.map(([n,i])=>[n,i]); persist(); closeSheet(); render(); toast(moved?`저장했어요 · 내역 ${moved}건도 바꿨어요`:'저장했어요'); break; }
     case 'goBackup': setTab('more','settings'); if (!S.settings.url) backupForm(); else setTimeout(()=>$('#backupCard')?.scrollIntoView({behavior:'smooth'}),50); break;
     case 'setupBackup': backupForm(); break;
     case 'saveBackupCfg': {
