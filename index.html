@@ -1347,9 +1347,15 @@ document.addEventListener('click', async e=>{
       catch(_){ $('#bcode').focus(); toast('칸을 길게 눌러 붙여넣어 주세요'); }
       break; }
     case 'saveBackupCfg': {
+      const bcv = ($('#bcode')?.value||'').trim(), msgEl = $('#bcodemsg');
+      const warn = t => { if (msgEl) msgEl.innerHTML = `<span class="up">${t}</span>`; toast(t); };
+      if (bcv){ const c = parseCode(bcv);
+        if (!c) return warn('연결 코드가 잘렸거나 올바르지 않아요. 시트에서 코드 복사 버튼으로 다시 복사해 주세요');
+        $('#burl').value = c.url; $('#bkey').value = c.key; }
       const url=$('#burl').value.trim(), key=$('#bkey').value.trim();
-      if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return toast('URL은 …/exec 로 끝나야 해요');
-      if (!key) return toast('비밀 키를 입력해 주세요');
+      if (!url && !key) return warn('연결 코드를 붙여넣어 주세요');
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return warn('웹 앱 URL은 …/exec 로 끝나야 해요');
+      if (!key) return warn('비밀 키가 비어 있어요. 연결 코드를 붙여넣으면 자동으로 채워져요');
       const old = {url:S.settings.url, key:S.settings.key};
       S.settings.url=url; S.settings.key=key; toast('연결 확인 중…');
       try{ const r = await api('GET','ping'); if(!r.ok) throw new Error(r.error==='unauthorized'?'비밀 키가 맞지 않아요':r.error);
