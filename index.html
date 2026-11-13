@@ -792,11 +792,11 @@ function viewSettings(){
     <button class="cell" data-act="editCats" data-v="in"><span>수입 카테고리</span><span class="muted">${S.cats.in.length}개 <span class="chev">›</span></span></button></div>`;
 
   const lb = s.lastBackup ? new Date(s.lastBackup) : null;
-  h += `<div class="card" id="backupCard"><h3>☁️ 구글 시트 백업</h3>
-    <button class="cell" data-act="setupBackup"><span>연결 설정<br><small>${s.url?'연결됨':'아직 연결 안 됨'}</small></span><span class="chev">›</span></button>
+  h += `<div class="card" id="backupCard"><h3>☁️ 백업</h3>
+    <button class="cell" data-act="setupBackup"><span>연결 설정<br><small>${!s.url?'아직 연결 안 됨':s.mode==='shared'?`🔒 공용 백업 · 암호화됨${s.sname?` (${esc(s.sname)})`:''}`:'내 구글 시트에 연결됨'}</small></span><span class="chev">›</span></button>
     <div class="cell"><span>마지막 백업<br><small>${lb?`${lb.getMonth()+1}/${lb.getDate()} ${pad(lb.getHours())}:${pad(lb.getMinutes())}`:'없음'}${s.dirty&&s.url?' · 보낼 변경사항 있음':''}${s.lastErr?`<br><span class="up">${esc(s.lastErr)}</span>`:''}</small></span>
       <button class="btn sm ghost" data-act="backupNow" ${s.url?'':'disabled'}>지금 백업</button></div>
-    <button class="cell" data-act="restore" ${s.url?'':'disabled'}><span>시트에서 복원<br><small>백업된 데이터로 이 기기 데이터를 덮어써요</small></span><span class="chev">›</span></button></div>`;
+    <button class="cell" data-act="restore" ${s.url?'':'disabled'}><span>백업에서 복원<br><small>백업된 데이터로 이 기기 데이터를 덮어써요</small></span><span class="chev">›</span></button></div>`;
 
   h += `<div class="card"><h3>📁 파일로 보관</h3>
     <button class="cell" data-act="exportJson"><span>JSON으로 내보내기<br><small>파일 앱이나 iCloud에 보관</small></span><span class="chev">›</span></button>
@@ -1183,30 +1183,73 @@ function drawCats(){
 /* ---- 백업 설정 ---- */
 // 백업 템플릿 시트 (사본 만들기 링크). 비어 있으면 안내만 숨겨요.
 const TEMPLATE_URL = 'https://docs.google.com/spreadsheets/d/1jtJscnh7DNEHm8Eo6S3K-t799Vr0qBpRwvDEHyZABUY/copy';
-// 연결 코드: GGB1. + base64url({u, k})
+// 연결 코드: GGB1.(내 백업 시트) = base64url({u, k}) / GGB2.(공용 백업 초대) = base64url({u, i, t, n})
 function parseCode(str){
-  const m = String(str||'').match(/GGB1\.([A-Za-z0-9_-]+)/); if (!m) return null;
-  try{ let b = m[1].replace(/-/g,'+').replace(/_/g,'/'); while (b.length%4) b+='=';
-    const o = JSON.parse(atob(b)); return (o && o.u && o.k) ? {url:o.u, key:o.k} : null; }catch(_){ return null; }
+  const m = String(str||'').match(/GGB([12])\.([A-Za-z0-9_-]+)/); if (!m) return null;
+  try{ let b = m[2].replace(/-/g,'+').replace(/_/g,'/'); while (b.length%4) b+='=';
+    const o = JSON.parse(decodeURIComponent(escape(atob(b))));
+    if (m[1]==='1') return (o && o.u && o.k) ? {mode:'sheet', url:o.u, key:o.k} : null;
+    return (o && o.u && o.i && o.t) ? {mode:'shared', url:o.u, id:o.i, token:o.t, name:o.n||''} : null;
+  }catch(_){ return null; }
+}
+
+/* ---- 암호화 (공용 백업용): 백업 비밀번호 → PBKDF2 → AES-GCM ---- */
+function b64(buf){ const a = new Uint8Array(buf); let s=''; for (let i=0;i<a.length;i+=0x8000) s += String.fromCharCode.apply(null, a.subarray(i,i+0x8000)); return btoa(s); }
+const unb64 = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+async function deriveKey(pass, salt){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+  const k = await crypto.subtle.deriveKey({name:'PBKDF2', salt:new TextEncoder().encode('gagyebu:'+salt), iterations:200000, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, true, ['encrypt','decrypt']);
+  return b64(await crypto.subtle.exportKey('raw', k));
+}
+const aesKey = kb => crypto.subtle.importKey('raw', unb64(kb), 'AES-GCM', false, ['encrypt','decrypt']);
+async function encryptData(obj, kb){
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, await aesKey(kb), new TextEncoder().encode(JSON.stringify(obj)));
+  return 'E1.' + b64(iv) + '.' + b64(ct);
+}
+async function decryptData(blob, kb){
+  const [tag, iv, ct] = String(blob).split('.'); if (tag!=='E1') throw new Error('암호화된 백업이 아니에요');
+  try{ const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:unb64(iv)}, await aesKey(kb), unb64(ct)); return JSON.parse(new TextDecoder().decode(pt)); }
+  catch(_){ throw new Error('백업 비밀번호가 맞지 않아요'); }
+}
+async function sharedCall(c, method, payload){
+  if (method==='GET'){ const r = await fetch(`${c.url}?action=${payload}&id=${encodeURIComponent(c.id)}&t=${encodeURIComponent(c.token)}`); return r.json(); }
+  const r = await fetch(c.url, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(Object.assign({id:c.id, t:c.token}, payload))});
+  return r.json();
 }
 function backupForm(prefill){
   const s = S.settings;
-  let h = head('구글 시트 백업');
-  h += `<div class="notice">백업 시트의 메뉴 <b style="display:inline">가계부 → 앱 연결 코드 만들기</b>에서 나온 <b style="display:inline">연결 코드</b>를 붙여넣으세요. 저장하면 내역이 바뀔 때마다 자동으로 백업돼요.</div>`;
-  if (TEMPLATE_URL && !s.url) h += `<p class="hint" style="margin:-4px 0 12px">아직 백업 시트가 없다면 <a href="${TEMPLATE_URL}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:650">백업 시트 사본 만들기 ›</a></p>`;
-  h += `<div class="label">연결 코드</div><div style="display:flex;gap:6px"><input class="field" id="bcode" placeholder="GGB1.로 시작하는 코드" autocapitalize="off" autocorrect="off" autocomplete="off" value="${esc(prefill||'')}" style="min-width:0">
+  let h = head('백업 연결');
+  if (s.mode==='shared' && s.url) h += `<div class="notice">🔒 <b style="display:inline">공용 백업</b>에 연결돼 있어요${s.sname?` (${esc(s.sname)})`:''}. 백업 비밀번호로 암호화돼서 저장돼요.</div>`;
+  else h += `<div class="notice">받은 <b style="display:inline">초대 코드</b>나 내 백업 시트의 <b style="display:inline">연결 코드</b>를 붙여넣으세요. 저장하면 내역이 바뀔 때마다 자동으로 백업돼요.</div>`;
+  h += `<div class="label">초대 코드 · 연결 코드</div><div style="display:flex;gap:6px"><input class="field" id="bcode" placeholder="GGB로 시작하는 코드" autocapitalize="off" autocorrect="off" autocomplete="off" value="${esc(prefill||'')}" style="min-width:0">
     <button class="chip" data-act="pasteCode" style="flex:none">붙여넣기</button></div>
-    <p class="hint" id="bcodemsg"></p>`;
-  h += `<details style="margin-top:6px"${s.url&&!prefill?' open':''}><summary class="hint" style="cursor:pointer">직접 입력 (웹 앱 URL·비밀 키)</summary>`;
-  h += `<div class="label">웹 앱 URL</div><input class="field" id="burl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(s.url)}" autocapitalize="off" autocorrect="off">`;
-  h += `<div class="label">비밀 키</div><input class="field" id="bkey" placeholder="비밀 키" value="${esc(s.key)}" autocapitalize="off" autocorrect="off"></details>`;
+    <p class="hint" id="bcodemsg"></p><div id="bpassbox"></div>`;
+  h += `<details style="margin-top:6px"${s.url&&s.mode!=='shared'&&!prefill?' open':''}><summary class="hint" style="cursor:pointer">직접 입력 (웹 앱 URL·비밀 키)</summary>`;
+  h += `<div class="label">웹 앱 URL</div><input class="field" id="burl" placeholder="https://script.google.com/macros/s/.../exec" value="${s.mode==='shared'?'':esc(s.url)}" autocapitalize="off" autocorrect="off">`;
+  h += `<div class="label">비밀 키</div><input class="field" id="bkey" placeholder="비밀 키" value="${s.mode==='shared'?'':esc(s.key)}" autocapitalize="off" autocorrect="off"></details>`;
   h += `<div class="btns"><button class="btn" data-act="saveBackupCfg">연결 테스트 후 저장</button>${s.url?`<button class="btn danger" data-act="clearBackupCfg">연결 해제</button>`:''}</div>`;
   openSheet(h);
-  const bc = $('#bcode'), msg = $('#bcodemsg');
-  const apply = ()=>{ const c = parseCode(bc.value);
+  const bc = $('#bcode'), msg = $('#bcodemsg'), box = $('#bpassbox');
+  let seq = 0;
+  const apply = async ()=>{ const c = parseCode(bc.value), my = ++seq; box.innerHTML = ''; UI.sharedInfo = null;
     if (!bc.value.trim()){ msg.textContent=''; return; }
-    if (c){ $('#burl').value = c.url; $('#bkey').value = c.key; msg.innerHTML = '<span class="down">✓ 올바른 연결 코드예요</span>'; }
-    else msg.innerHTML = '<span class="up">연결 코드가 아니에요. 시트의 연결 탭에서 다시 복사해 주세요</span>'; };
+    if (!c){ msg.innerHTML = '<span class="up">코드가 잘렸거나 올바르지 않아요. 다시 복사해 주세요</span>'; return; }
+    if (c.mode==='sheet'){ $('#burl').value = c.url; $('#bkey').value = c.key; msg.innerHTML = '<span class="down">✓ 내 백업 시트 연결 코드예요</span>'; return; }
+    $('#burl').value = ''; $('#bkey').value = '';
+    msg.innerHTML = `<span class="down">✓ 초대 코드예요${c.name?` (${esc(c.name)})`:''}</span> · 확인 중…`;
+    let r; try{ r = await sharedCall(c, 'GET', 'ping'); }catch(err){ if (my===seq) msg.innerHTML = `<span class="up">접속 실패: ${esc(netErr(err))}</span>`; return; }
+    if (my!==seq) return;
+    if (!r.ok){ msg.innerHTML = `<span class="up">${r.error==='unauthorized'?'사용할 수 없는 초대 코드예요. 코드를 준 사람에게 다시 받아주세요':esc(r.error)}</span>`; return; }
+    UI.sharedInfo = {c, hasBackup: !!r.hasBackup};
+    msg.innerHTML = `<span class="down">✓ 초대 코드예요${c.name?` (${esc(c.name)})`:''}</span>`;
+    box.innerHTML = r.hasBackup
+      ? `<div class="label">백업 비밀번호</div><input class="field" id="bpass" type="password" autocomplete="current-password" placeholder="처음 연결할 때 정한 비밀번호">
+         <p class="hint">이 초대 코드에 이미 백업이 있어요. 비밀번호를 넣으면 불러올 수 있어요.</p>`
+      : `<div class="label">백업 비밀번호 정하기</div><input class="field" id="bpass" type="password" autocomplete="new-password" placeholder="4자 이상">
+         <input class="field" id="bpass2" type="password" autocomplete="new-password" placeholder="한 번 더 입력" style="margin-top:8px">
+         <div class="notice warn" style="margin-top:10px">🔒 백업은 이 비밀번호로 잠겨서 저장돼요. 백업을 운영하는 사람도 내용을 볼 수 없어요.<br><b style="display:inline">비밀번호를 잊으면 백업을 복원할 수 없으니</b> 꼭 기억해 두세요.</div>`;
+  };
   bc.addEventListener('input', apply); if (prefill) apply();
 }
 
@@ -1229,8 +1272,10 @@ function report(){
   };
 }
 function exportData(){ const d = JSON.parse(JSON.stringify(S)); d.settings = {last:S.settings.last||{}}; return d; }
+function sharedCfg(){ const s = S.settings; return {url:s.url, id:s.sid, token:s.stoken}; }
 async function api(method, payload){
   const s = S.settings;
+  if (s.mode==='shared') return sharedCall(sharedCfg(), method, payload);
   if (method==='GET'){
     const r = await fetch(`${s.url}?action=${payload}&key=${encodeURIComponent(s.key)}`);
     return r.json();
@@ -1245,8 +1290,10 @@ async function backupNow(manual){
   backingUp = true;
   const stamp = S.updated;
   try{
-    const res = await api('POST', {action:'backup', data:exportData(), report:report()});
-    if (!res.ok) throw new Error(res.error==='unauthorized'?'비밀 키가 맞지 않아요':(res.error||'알 수 없는 오류'));
+    const res = s.mode==='shared'
+      ? await api('POST', {action:'backup', blob: await encryptData(exportData(), s.ekey)})
+      : await api('POST', {action:'backup', data:exportData(), report:report()});
+    if (!res.ok) throw new Error(res.error==='unauthorized'?(s.mode==='shared'?'초대 코드가 더 이상 유효하지 않아요':'비밀 키가 맞지 않아요'):res.error==='too large'?'백업이 너무 커요':(res.error||'알 수 없는 오류'));
     s.lastBackup = new Date().toISOString(); s.lastErr='';
     if (S.updated===stamp) s.dirty = false;
     persist(false); if (manual) toast('백업 완료');
@@ -1256,17 +1303,17 @@ async function backupNow(manual){
   }finally{ backingUp=false; render(); if (s.dirty && !s.lastErr) scheduleBackup(); }
 }
 async function restore(skipAsk){
-  if (!skipAsk && !confirm('구글 시트에 백업된 데이터로 이 기기의 데이터를 바꿀까요?\n(지금 기기에만 있는 내역은 사라져요)')) return;
+  if (!skipAsk && !confirm('백업된 데이터로 이 기기의 데이터를 바꿀까요?\n(지금 기기에만 있는 내역은 사라져요)')) return;
   toast('불러오는 중…');
   try{
     const res = await api('GET','restore');
-    if (!res.ok) throw new Error(res.error==='unauthorized'?'비밀 키가 맞지 않아요':res.error==='empty'?'아직 백업이 없어요':(res.error||'오류'));
-    applyImported(res.data); toast(`복원 완료 · 내역 ${S.txs.length}건, 계좌 ${S.accounts.length}개`);
+    if (!res.ok) throw new Error(res.error==='unauthorized'?'연결 정보가 맞지 않아요':res.error==='empty'?'아직 백업이 없어요':(res.error||'오류'));
+    applyImported(S.settings.mode==='shared' ? await decryptData(res.blob, S.settings.ekey) : res.data); toast(`복원 완료 · 내역 ${S.txs.length}건, 계좌 ${S.accounts.length}개`);
   }catch(e){ toast('복원 실패: '+e.message); }
 }
 function applyImported(d){
   if (!d || !Array.isArray(d.accounts) || !Array.isArray(d.txs)) throw new Error('가계부 데이터가 아니에요');
-  const keep = {url:S.settings.url, key:S.settings.key};
+  const st = S.settings, keep = {url:st.url, key:st.key, mode:st.mode, sid:st.sid, stoken:st.stoken, ekey:st.ekey, sname:st.sname};
   const b = blankState();
   S = Object.assign(b, d);
   S.settings = Object.assign(b.settings, d.settings||{}, keep, {dirty:false, lastErr:'', lastBackup:new Date().toISOString()});
@@ -1349,23 +1396,44 @@ document.addEventListener('click', async e=>{
     case 'saveBackupCfg': {
       const bcv = ($('#bcode')?.value||'').trim(), msgEl = $('#bcodemsg');
       const warn = t => { if (msgEl) msgEl.innerHTML = `<span class="up">${t}</span>`; toast(t); };
-      if (bcv){ const c = parseCode(bcv);
-        if (!c) return warn('연결 코드가 잘렸거나 올바르지 않아요. 시트에서 코드 복사 버튼으로 다시 복사해 주세요');
-        $('#burl').value = c.url; $('#bkey').value = c.key; }
+      const pc = bcv ? parseCode(bcv) : null;
+      if (bcv && !pc) return warn('코드가 잘렸거나 올바르지 않아요. 다시 복사해 주세요');
+      if (pc && pc.mode==='shared'){
+        const info = UI.sharedInfo;
+        if (!info || info.c.token!==pc.token) return warn('초대 코드를 확인하는 중이에요. 잠시 후 다시 눌러주세요');
+        const pass = ($('#bpass')?.value||'');
+        if (pass.length<4) return warn('백업 비밀번호를 4자 이상 입력해 주세요');
+        if (!info.hasBackup && pass!==($('#bpass2')?.value||'')) return warn('비밀번호 두 칸이 서로 달라요');
+        toast('비밀번호 확인 중…');
+        let kb; try{ kb = await deriveKey(pass, pc.id); }catch(err){ return warn('이 브라우저에서는 암호화를 쓸 수 없어요'); }
+        let restored = null;
+        if (info.hasBackup){
+          try{ const r = await sharedCall(pc, 'GET', 'restore'); if (!r.ok) throw new Error(r.error==='empty'?'아직 백업이 없어요':r.error);
+            restored = await decryptData(r.blob, kb); }
+          catch(err){ return warn(err.message.includes('비밀번호')?'백업 비밀번호가 맞지 않아요':'불러오기 실패: '+netErr(err)); }
+        }
+        Object.assign(S.settings, {mode:'shared', url:pc.url, key:'', sid:pc.id, stoken:pc.token, ekey:kb, sname:pc.name, lastErr:''});
+        persist(false); closeSheet(); render();
+        if (restored && confirm(`연결됐어요! 백업이 있어요 (내역 ${restored.txs.length}건, 계좌 ${restored.accounts.length}개).\n지금 불러올까요?`)){ applyImported(restored); toast(`복원 완료 · 내역 ${S.txs.length}건`); }
+        else if (S.accounts.length || S.txs.length){ S.settings.dirty=true; backupNow(true); }
+        else toast('연결됐어요 · 계좌를 추가하면 자동으로 백업돼요');
+        break;
+      }
+      if (pc){ $('#burl').value = pc.url; $('#bkey').value = pc.key; }
       const url=$('#burl').value.trim(), key=$('#bkey').value.trim();
       if (!url && !key) return warn('연결 코드를 붙여넣어 주세요');
       if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return warn('웹 앱 URL은 …/exec 로 끝나야 해요');
       if (!key) return warn('비밀 키가 비어 있어요. 연결 코드를 붙여넣으면 자동으로 채워져요');
-      const old = {url:S.settings.url, key:S.settings.key};
-      S.settings.url=url; S.settings.key=key; toast('연결 확인 중…');
+      const old = {url:S.settings.url, key:S.settings.key, mode:S.settings.mode};
+      S.settings.url=url; S.settings.key=key; S.settings.mode='sheet'; toast('연결 확인 중…');
       try{ const r = await api('GET','ping'); if(!r.ok) throw new Error(r.error==='unauthorized'?'비밀 키가 맞지 않아요':r.error);
         S.settings.lastErr=''; persist(false); closeSheet(); render();
         if (r.hasBackup && confirm(r.isInitial ? `연결됐어요! 미리 넣어둔 계좌 ${r.accCount}개를 불러올까요?` : `연결됐어요! 시트에 백업이 있어요 (내역 ${r.txCount}건, 계좌 ${r.accCount}개).\n지금 불러올까요?`)) { await restore(true); }
         else if (S.accounts.length || S.txs.length) { S.settings.dirty=true; backupNow(true); }
         else toast('연결됐어요');
-      }catch(err){ S.settings.url=old.url; S.settings.key=old.key; openSheet && $('#bcodemsg') && ($('#bcodemsg').innerHTML = `<span class="up">연결 실패: ${esc(netErr(err))}</span>`); toast('연결 실패 · 아래 안내를 확인해 주세요'); }
+      }catch(err){ S.settings.url=old.url; S.settings.key=old.key; S.settings.mode=old.mode; openSheet && $('#bcodemsg') && ($('#bcodemsg').innerHTML = `<span class="up">연결 실패: ${esc(netErr(err))}</span>`); toast('연결 실패 · 아래 안내를 확인해 주세요'); }
       break; }
-    case 'clearBackupCfg': if (confirm('백업 연결을 해제할까요? (시트의 데이터는 그대로 있어요)')){ S.settings.url=''; S.settings.key=''; persist(false); closeSheet(); render(); } break;
+    case 'clearBackupCfg': if (confirm('백업 연결을 해제할까요? (이미 백업된 데이터는 그대로 있어요)')){ Object.assign(S.settings, {url:'', key:'', mode:'', sid:'', stoken:'', ekey:'', sname:''}); persist(false); closeSheet(); render(); } break;
     case 'backupNow': S.settings.dirty=true; backupNow(true); break;
     case 'restore': restore(); break;
     case 'search': searchForm(); break;
