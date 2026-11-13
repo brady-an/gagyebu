@@ -1399,8 +1399,14 @@ document.addEventListener('click', async e=>{
       const pc = bcv ? parseCode(bcv) : null;
       if (bcv && !pc) return warn('코드가 잘렸거나 올바르지 않아요. 다시 복사해 주세요');
       if (pc && pc.mode==='shared'){
-        const info = UI.sharedInfo;
-        if (!info || info.c.token!==pc.token) return warn('초대 코드를 확인하는 중이에요. 잠시 후 다시 눌러주세요');
+        let info = UI.sharedInfo;
+        if (!info || info.c.token!==pc.token){ // 처음 확인이 실패했거나 아직 안 끝났으면 여기서 다시 확인
+          toast('초대 코드 확인 중…');
+          let r; try{ r = await sharedCall(pc, 'GET', 'ping'); }catch(err){ return warn('접속 실패: '+netErr(err)); }
+          if (!r.ok) return warn(r.error==='unauthorized'?'사용할 수 없는 초대 코드예요. 코드를 준 사람에게 다시 받아주세요':r.error);
+          await (async()=>{ $('#bcode').dispatchEvent(new Event('input')); })();
+          return warn('초대 코드를 확인했어요. 백업 비밀번호를 입력하고 다시 눌러주세요');
+        }
         const pass = ($('#bpass')?.value||'');
         if (pass.length<4) return warn('백업 비밀번호를 4자 이상 입력해 주세요');
         if (!info.hasBackup && pass!==($('#bpass2')?.value||'')) return warn('비밀번호 두 칸이 서로 달라요');
